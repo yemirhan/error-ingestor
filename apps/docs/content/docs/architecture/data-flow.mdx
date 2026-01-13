@@ -1,0 +1,467 @@
+---
+title: Data Flow
+description: Error lifecycle and data flow in Error Ingestor.
+---
+
+# Data Flow
+
+Understand how errors flow through the Error Ingestor system from capture to visualization.
+
+## Error Lifecycle
+
+### 1. Error Occurrence
+
+An error occurs in your application:
+
+```typescript
+// Thrown error
+throw new Error("Something went wrong");
+
+// Or caught error
+try {
+  await riskyOperation();
+} catch (error) {
+  // Error caught here
+}
+```
+
+### 2. Error Capture
+
+The error is captured by Error Ingestor:
+
+```typescript
+// Automatic capture via ErrorBoundary
+<ErrorBoundary>
+  <App />  {/* Error thrown here is auto-captured */}
+</ErrorBoundary>
+
+// Manual capture
+try {
+  await operation();
+} catch (error) {
+  ErrorIngestor.capture(error);
+}
+
+// Global handler (automatic)
+// Catches unhandled errors and promise rejections
+```
+
+### 3. Event Creation
+
+The SDK creates an `ErrorEvent` object:
+
+```typescript
+const event: ErrorEvent = {
+  id: generateUUID(),                    // Unique ID
+  code: getErrorCode(error),             // "NETWORK_ERROR"
+  message: error.message,                // "Failed to fetch"
+  stackTrace: error.stack,               // Stack trace
+  appId: config.appId,                   // From init config
+  appVersion: config.appVersion,         // From init config
+  platform: detectPlatform(),            // "web"
+  platformVersion: getPlatformVersion(), // "Chrome 120.0"
+  userId: currentUserId,                 // If set
+  timestamp: new Date().toISOString(),   // Now
+  metadata: options.metadata,            // Custom data
+  tags: options.tags,                    // Custom tags
+};
+```
+
+### 4. Queue Addition
+
+The event is added to the internal queue:
+
+```typescript
+class ErrorQueue {
+  private queue: ErrorEvent[] = [];
+
+  add(event: ErrorEvent) {
+    this.queue.push(event);
+    this.checkFlush();
+  }
+
+  private checkFlush() {
+    if (this.queue.length >= this.batchSize) {
+      this.flush();
+    }
+  }
+}
+```
+
+### 5. Batch Flush
+
+When batch size is reached or interval expires:
+
+```typescript
+async flush() {
+  if (this.queue.length === 0) return;
+
+  const batch = this.queue.splice(0, this.batchSize);
+
+  try {
+    await this.send(batch);
+  } catch (error) {
+    // Add to retry queue
+    this.retryQueue.push(...batch);
+  }
+}
+```
+
+### 6. HTTP Transport
+
+Events are sent to the server:
+
+```typescript
+POST /api/v1/ingest
+Headers:
+  X-API-Key: ei_your_api_key
+  Content-Type: application/json
+
+Body:
+{
+  "events": [
+    { id, code, message, ... },
+    { id, code, message, ... },
+    ...
+  ]
+}
+```
+
+### 7. Server Processing
+
+The server handles the request:
+
+```
+Request Received
+      │
+      ▼
+┌─────────────────┐
+│ Validate API Key│──▶ 401 if invalid
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Parse JSON Body │──▶ 400 if invalid
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Validate Schema │──▶ 400 if invalid
+│   (Zod)         │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Check App ID    │──▶ 403 if mismatch
+│   Match         │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Insert to       │
+│ ClickHouse      │
+└────────┬────────┘
+         │
+         ▼
+   Return 200 OK
+```
+
+### 8. Database Storage
+
+ClickHouse stores the events:
+
+```sql
+INSERT INTO error_events
+(id, code, message, stack_trace, app_id, app_version,
+ platform, platform_version, user_id, timestamp, metadata, tags)
+VALUES
+(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+```
+
+### 9. Query & Display
+
+Dashboard queries and displays errors:
+
+```sql
+SELECT *
+FROM error_events
+WHERE app_id = 'my-app'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+## Batching Strategy
+
+### Why Batch?
+
+| Individual Requests | Batched Requests |
+|---------------------|------------------|
+| 100 errors = 100 requests | 100 errors = 10 requests |
+| High network overhead | Low network overhead |
+| Server overload risk | Server-friendly |
+| Battery drain (mobile) | Battery efficient |
+
+### Batch Parameters
+
+```typescript
+ErrorIngestor.init({
+  batchSize: 10,      // Flush when 10 errors queued
+  flushInterval: 5000 // Or every 5 seconds
+});
+```
+
+### Flush Triggers
+
+1. **Batch Size Reached**
+   ```
+   Queue: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10]
+                                              ↑
+                                        Batch size = 10
+                                        → Flush!
+   ```
+
+2. **Interval Timer**
+   ```
+   Queue: [e1, e2, e3]
+   Timer: 5 seconds elapsed
+   → Flush!
+   ```
+
+3. **Manual Flush**
+   ```typescript
+   await ErrorIngestor.flush();
+   ```
+
+4. **App Closing**
+   ```typescript
+   await ErrorIngestor.destroy();
+   // Flushes remaining errors
+   ```
+
+## Retry Logic
+
+### Exponential Backoff
+
+Failed requests are retried with increasing delays:
+
+```
+Attempt 1: Immediate
+Attempt 2: 2 seconds
+Attempt 3: 4 seconds
+Attempt 4: 8 seconds
+...
+```
+
+### Retry Flow
+
+```
+Send Request
+      │
+      ▼
+   Success? ──Yes──▶ Done
+      │
+     No
+      │
+      ▼
+┌─────────────────┐
+│ Retry Count <   │
+│ Max Retries?    │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+   Yes       No
+    │         │
+    ▼         ▼
+  Wait      Drop
+  2^n sec   Events
+    │       (log)
+    ▼
+  Retry
+```
+
+### Code Implementation
+
+```typescript
+async sendWithRetry(events: ErrorEvent[], attempt = 0): Promise<void> {
+  try {
+    await this.send(events);
+  } catch (error) {
+    if (attempt < this.maxRetries) {
+      const delay = Math.pow(2, attempt) * 1000;
+      await sleep(delay);
+      return this.sendWithRetry(events, attempt + 1);
+    }
+    // Max retries exceeded, drop events
+    this.logger.error("Failed to send events after max retries");
+  }
+}
+```
+
+## Platform Detection
+
+### Detection Flow
+
+```
+┌─────────────────────────────────┐
+│ Check for React Native Platform │
+│ (Platform.OS)                   │
+└───────────────┬─────────────────┘
+                │
+       ┌────────┴────────┐
+       │                 │
+    Present           Absent
+       │                 │
+       ▼                 ▼
+  ┌─────────┐       ┌─────────┐
+  │ iOS or  │       │  Web    │
+  │ Android │       │         │
+  └─────────┘       └─────────┘
+```
+
+### Implementation
+
+```typescript
+function getPlatformInfo(): { platform: Platform; platformVersion: string } {
+  // Check for React Native
+  if (typeof Platform !== "undefined" && Platform.OS) {
+    return {
+      platform: Platform.OS as Platform,
+      platformVersion: String(Platform.Version || "unknown"),
+    };
+  }
+
+  // Web fallback
+  return {
+    platform: "web",
+    platformVersion: typeof navigator !== "undefined"
+      ? navigator.userAgent
+      : "unknown",
+  };
+}
+```
+
+## Global Error Handlers
+
+### React Native
+
+```typescript
+// Capture unhandled JS errors
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  ErrorIngestor.capture(error, {
+    tags: {
+      source: "global-handler",
+      fatal: String(isFatal),
+    },
+  });
+
+  // Call original handler
+  originalHandler?.(error, isFatal);
+});
+```
+
+### Web (Unhandled Rejections)
+
+```typescript
+window.addEventListener("unhandledrejection", (event) => {
+  const error = event.reason instanceof Error
+    ? event.reason
+    : new Error(String(event.reason));
+
+  ErrorIngestor.capture(error, {
+    tags: { source: "unhandled-rejection" },
+  });
+});
+```
+
+## Data Transformation
+
+### Client to Server
+
+```typescript
+// Client creates event
+const clientEvent = {
+  id: "550e8400-...",
+  code: "NETWORK_ERROR",
+  message: "Failed to fetch",
+  // ... other fields
+  metadata: { endpoint: "/api/data" },
+  tags: { environment: "production" },
+};
+
+// Sent as JSON in request body
+POST /api/v1/ingest
+{
+  "events": [clientEvent]
+}
+```
+
+### Server to Database
+
+```typescript
+// Server transforms for ClickHouse
+const dbRow = {
+  id: event.id,
+  code: event.code,
+  message: event.message,
+  stack_trace: event.stackTrace || "",
+  app_id: event.appId,
+  app_version: event.appVersion,
+  platform: event.platform,
+  platform_version: event.platformVersion,
+  user_id: event.userId || null,
+  timestamp: event.timestamp,
+  metadata: JSON.stringify(event.metadata || {}),
+  tags: event.tags || {},
+};
+```
+
+### Database to Dashboard
+
+```typescript
+// Query returns rows
+const rows = await clickhouse.query("SELECT * FROM error_events");
+
+// Transform back to ErrorEvent
+const events = rows.map(row => ({
+  id: row.id,
+  code: row.code,
+  message: row.message,
+  stackTrace: row.stack_trace,
+  appId: row.app_id,
+  appVersion: row.app_version,
+  platform: row.platform,
+  platformVersion: row.platform_version,
+  userId: row.user_id,
+  timestamp: row.timestamp,
+  metadata: JSON.parse(row.metadata),
+  tags: row.tags,
+}));
+```
+
+## Performance Considerations
+
+### Client-Side
+
+| Optimization | Benefit |
+|--------------|---------|
+| Batching | Fewer network requests |
+| Async queue | Non-blocking capture |
+| Lazy initialization | Faster app startup |
+
+### Server-Side
+
+| Optimization | Benefit |
+|--------------|---------|
+| Batch inserts | Efficient DB writes |
+| Connection pooling | Reuse connections |
+| Async processing | Handle concurrent requests |
+
+### Database
+
+| Optimization | Benefit |
+|--------------|---------|
+| LowCardinality | Faster queries on categorical |
+| Partitioning | Efficient time-range queries |
+| TTL | Automatic data cleanup |
+| Ordering | Optimized for common queries |

@@ -1,0 +1,344 @@
+---
+title: Custom Errors
+description: Creating and using custom error codes with AppError.
+---
+
+# Custom Errors
+
+Create typed, categorized errors using the `AppError` class and custom error codes.
+
+## Why Custom Errors?
+
+Custom errors help you:
+
+- **Categorize errors** - Group similar errors together
+- **Filter in dashboard** - Search by error code
+- **Handle specifically** - Different handling for different codes
+- **Track patterns** - Identify recurring issues
+
+## Using AppError
+
+### Basic Usage
+
+```typescript
+import { AppError, ErrorCodes } from "@error-ingestor/client";
+
+// Throw a pre-defined error
+throw new AppError(ErrorCodes.NETWORK_ERROR, "Failed to connect to server");
+```
+
+### With Metadata
+
+```typescript
+throw new AppError(
+  ErrorCodes.VALIDATION_ERROR,
+  "Invalid email format",
+  {
+    field: "email",
+    value: "not-an-email",
+    expected: "valid email address",
+  }
+);
+```
+
+## Pre-defined Error Codes
+
+The SDK includes common error codes:
+
+```typescript
+import { ErrorCodes } from "@error-ingestor/client";
+
+// Authentication errors
+ErrorCodes.USER_NOT_FOUND
+ErrorCodes.USER_NOT_AUTHENTICATED
+ErrorCodes.INVALID_CREDENTIALS
+ErrorCodes.SESSION_EXPIRED
+ErrorCodes.UNAUTHORIZED
+ErrorCodes.PREMIUM_REQUIRED
+
+// Network errors
+ErrorCodes.NETWORK_ERROR
+ErrorCodes.TIMEOUT
+
+// Data errors
+ErrorCodes.DOCUMENT_NOT_FOUND
+ErrorCodes.FETCH_FAILED
+ErrorCodes.VALIDATION_ERROR
+ErrorCodes.MISSING_FIELD
+
+// General errors
+ErrorCodes.UNKNOWN
+ErrorCodes.INTERNAL
+```
+
+## Creating Custom Error Codes
+
+Define your own error codes for your application:
+
+```typescript
+// src/errors/codes.ts
+export const MyErrorCodes = {
+  // Payment errors
+  PAYMENT_FAILED: "PAYMENT_FAILED",
+  CARD_DECLINED: "CARD_DECLINED",
+  INSUFFICIENT_FUNDS: "INSUFFICIENT_FUNDS",
+
+  // Cart errors
+  CART_EMPTY: "CART_EMPTY",
+  ITEM_OUT_OF_STOCK: "ITEM_OUT_OF_STOCK",
+  QUANTITY_EXCEEDED: "QUANTITY_EXCEEDED",
+
+  // User errors
+  PROFILE_INCOMPLETE: "PROFILE_INCOMPLETE",
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+} as const;
+
+export type MyErrorCode = typeof MyErrorCodes[keyof typeof MyErrorCodes];
+```
+
+### Using Custom Codes
+
+```typescript
+import { AppError } from "@error-ingestor/client";
+import { MyErrorCodes } from "./errors/codes";
+
+throw new AppError(
+  MyErrorCodes.CARD_DECLINED,
+  "Your card was declined",
+  { lastFourDigits: "4242" }
+);
+```
+
+## Error Factory Functions
+
+Create factory functions for commonly used errors:
+
+```typescript
+// src/errors/factories.ts
+import { AppError } from "@error-ingestor/client";
+import { MyErrorCodes } from "./codes";
+
+export const Errors = {
+  paymentFailed: (reason: string, orderId: string) =>
+    new AppError(MyErrorCodes.PAYMENT_FAILED, reason, { orderId }),
+
+  cardDeclined: (lastFour: string) =>
+    new AppError(
+      MyErrorCodes.CARD_DECLINED,
+      "Your card was declined. Please try another payment method.",
+      { lastFourDigits: lastFour }
+    ),
+
+  outOfStock: (productId: string, productName: string) =>
+    new AppError(
+      MyErrorCodes.ITEM_OUT_OF_STOCK,
+      `${productName} is out of stock`,
+      { productId, productName }
+    ),
+
+  cartEmpty: () =>
+    new AppError(
+      MyErrorCodes.CART_EMPTY,
+      "Your cart is empty. Add items before checkout."
+    ),
+};
+```
+
+### Using Factory Functions
+
+```typescript
+import { Errors } from "./errors/factories";
+
+// Clean, readable error creation
+throw Errors.cardDeclined("4242");
+
+throw Errors.outOfStock("prod-123", "Blue T-Shirt");
+```
+
+## Type Guard
+
+Check if an error is an AppError:
+
+```typescript
+import { isAppError, AppError, ErrorCodes } from "@error-ingestor/client";
+
+try {
+  await someOperation();
+} catch (error) {
+  if (isAppError(error)) {
+    // TypeScript knows error is AppError
+    switch (error.code) {
+      case ErrorCodes.NETWORK_ERROR:
+        showNetworkError();
+        break;
+      case ErrorCodes.SESSION_EXPIRED:
+        redirectToLogin();
+        break;
+      default:
+        showGenericError(error.message);
+    }
+  } else {
+    // Regular Error
+    showGenericError("An unexpected error occurred");
+  }
+}
+```
+
+## Error Info Extraction
+
+Safely extract info from any error:
+
+```typescript
+import { getErrorInfo } from "@error-ingestor/client";
+
+try {
+  await someOperation();
+} catch (error) {
+  const { code, message } = getErrorInfo(error);
+
+  // Works with AppError, Error, or unknown
+  console.log(`[${code}] ${message}`);
+  // Output: [NETWORK_ERROR] Failed to connect
+  // Or: [UNKNOWN] Some error message
+}
+```
+
+## Combining with Neverthrow
+
+Use AppError with the Result pattern:
+
+```typescript
+import { Result, err, ok } from "neverthrow";
+import { AppError } from "@error-ingestor/client";
+import { MyErrorCodes } from "./codes";
+
+async function processPayment(
+  amount: number
+): Promise<Result<PaymentResult, AppError>> {
+  try {
+    const result = await paymentGateway.charge(amount);
+    return ok(result);
+  } catch (error) {
+    if (error.code === "card_declined") {
+      return err(new AppError(
+        MyErrorCodes.CARD_DECLINED,
+        "Payment declined",
+        { gatewayError: error.message }
+      ));
+    }
+    return err(new AppError(
+      MyErrorCodes.PAYMENT_FAILED,
+      "Payment processing failed",
+      { originalError: error.message }
+    ));
+  }
+}
+
+// Usage
+const result = await processPayment(99.99);
+
+result.match(
+  (payment) => {
+    console.log("Payment successful:", payment.id);
+  },
+  (error) => {
+    ErrorIngestor.capture(error);
+    showError(error.message);
+  }
+);
+```
+
+## Best Practices
+
+### 1. Organize by Domain
+
+```
+src/errors/
+├── codes.ts        # All error codes
+├── factories.ts    # Error factory functions
+├── auth.ts         # Auth-specific errors
+├── payment.ts      # Payment-specific errors
+└── index.ts        # Re-export all
+```
+
+### 2. Use Descriptive Codes
+
+```typescript
+// Good - descriptive
+"PAYMENT_CARD_EXPIRED"
+"USER_EMAIL_NOT_VERIFIED"
+
+// Bad - too generic
+"ERROR_1"
+"FAILED"
+```
+
+### 3. Include Useful Metadata
+
+```typescript
+// Good - actionable metadata
+new AppError(code, message, {
+  userId: "user-123",
+  orderId: "order-456",
+  attemptCount: 3,
+});
+
+// Bad - no context
+new AppError(code, message);
+```
+
+### 4. Consistent Error Messages
+
+```typescript
+// Good - user-friendly, consistent format
+"Unable to process payment. Please try again."
+"Your session has expired. Please log in again."
+
+// Bad - technical jargon
+"PaymentGateway::charge() returned null"
+"JWT token validation failed: exp claim"
+```
+
+## Complete Example
+
+```typescript
+// src/errors/index.ts
+import { AppError, ErrorCodes } from "@error-ingestor/client";
+
+// Extend with custom codes
+export const MyErrorCodes = {
+  ...ErrorCodes,
+  PAYMENT_FAILED: "PAYMENT_FAILED",
+  CARD_DECLINED: "CARD_DECLINED",
+  ORDER_NOT_FOUND: "ORDER_NOT_FOUND",
+} as const;
+
+// Factory functions
+export const Errors = {
+  // Auth
+  sessionExpired: () =>
+    new AppError(
+      ErrorCodes.SESSION_EXPIRED,
+      "Your session has expired. Please log in again."
+    ),
+
+  // Payment
+  paymentFailed: (orderId: string, reason: string) =>
+    new AppError(
+      MyErrorCodes.PAYMENT_FAILED,
+      "Unable to process payment. Please try again.",
+      { orderId, reason }
+    ),
+
+  // Orders
+  orderNotFound: (orderId: string) =>
+    new AppError(
+      MyErrorCodes.ORDER_NOT_FOUND,
+      "Order not found.",
+      { orderId }
+    ),
+};
+
+// Re-export
+export { AppError, isAppError, getErrorInfo } from "@error-ingestor/client";
+```

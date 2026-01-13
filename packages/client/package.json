@@ -1,0 +1,69 @@
+{
+  "name": "@error-ingestor/client",
+  "version": "0.1.0",
+  "description": "Client SDK for Error Ingestor - capture and track errors in React and React Native apps",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --external react --external react-native",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --external react --external react-native --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "error",
+    "tracking",
+    "monitoring",
+    "logging",
+    "react",
+    "react-native",
+    "error-boundary",
+    "sentry-alternative"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@error-ingestor/shared": "workspace:*",
+    "neverthrow": "^8.1.1"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.72.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "react": "^18.3.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0"
+  }
+}

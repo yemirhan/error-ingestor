@@ -1,0 +1,192 @@
+---
+title: Client SDK Overview
+description: Overview of the Error Ingestor client SDK architecture and design.
+---
+
+# Client SDK Overview
+
+The Error Ingestor client SDK provides a simple, efficient way to capture and report errors from your React or React Native applications.
+
+## Architecture
+
+The SDK follows a singleton pattern with a queue-based approach for error handling:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Your Application                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │ ErrorBoundary│───▶│ ErrorIngestor│───▶│  ErrorQueue │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│         │                  │                  │              │
+│         │           Manual Capture      Batching &          │
+│         │                                 Retry             │
+│         ▼                                   │               │
+│  ┌─────────────┐                           ▼               │
+│  │   AppError   │                    ┌─────────────┐        │
+│  │   + Codes    │                    │  HTTP POST  │        │
+│  └─────────────┘                    └─────────────┘        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────┐
+                    │  Error Ingestor API  │
+                    └─────────────────────┘
+```
+
+## Core Components
+
+### ErrorIngestor (Singleton)
+
+The main class for interacting with the SDK. It manages initialization, error capture, and queue operations.
+
+```typescript
+import { ErrorIngestor } from "@error-ingestor/client";
+
+// Initialize once
+ErrorIngestor.init(config);
+
+// Capture errors anywhere
+ErrorIngestor.capture(error);
+```
+
+### ErrorBoundary (React Component)
+
+A React component that catches errors during rendering, in lifecycle methods, and in constructors.
+
+```tsx
+import { ErrorBoundary } from "@error-ingestor/client";
+
+<ErrorBoundary fallback={<ErrorFallback />}>
+  <App />
+</ErrorBoundary>
+```
+
+### AppError (Error Class)
+
+A custom error class with typed error codes for better categorization.
+
+```typescript
+import { AppError, ErrorCodes } from "@error-ingestor/client";
+
+throw new AppError(ErrorCodes.NETWORK_ERROR, "Failed to connect");
+```
+
+### ErrorQueue (Internal)
+
+Manages error batching, retry logic, and HTTP transport. This is used internally by ErrorIngestor.
+
+## Singleton Pattern
+
+The ErrorIngestor uses a singleton pattern to ensure:
+
+1. **Single Initialization** - Configuration is set once
+2. **Global Access** - Capture errors from anywhere
+3. **Centralized Queue** - All errors go through one queue
+
+```typescript
+// First call initializes
+ErrorIngestor.init(config);
+
+// Subsequent calls return error
+ErrorIngestor.init(config); // Error: Already initialized
+```
+
+To reinitialize with different config:
+
+```typescript
+await ErrorIngestor.destroy();
+ErrorIngestor.init(newConfig);
+```
+
+## Error Event Structure
+
+Each captured error creates an `ErrorEvent` with the following structure:
+
+```typescript
+interface ErrorEvent {
+  id: string;           // UUID v4
+  code: string;         // Error code (e.g., "NETWORK_ERROR")
+  message: string;      // Error message
+  stackTrace?: string;  // Stack trace if available
+  appId: string;        // Your app ID
+  appVersion: string;   // Your app version
+  platform: "ios" | "android" | "web";
+  platformVersion: string;
+  userId?: string;      // User ID if set
+  timestamp: string;    // ISO 8601 timestamp
+  metadata?: Record<string, unknown>;
+  tags?: Record<string, string>;
+}
+```
+
+## Global Error Handlers
+
+The SDK automatically sets up global error handlers:
+
+### React Native
+
+```typescript
+// Catches unhandled JS errors
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  ErrorIngestor.capture(error, {
+    tags: { fatal: String(isFatal) }
+  });
+});
+```
+
+### Web
+
+```typescript
+// Catches unhandled promise rejections
+window.addEventListener("unhandledrejection", (event) => {
+  ErrorIngestor.capture(event.reason);
+});
+```
+
+## Platform Detection
+
+The SDK automatically detects the platform:
+
+| Platform | Detection Method |
+|----------|------------------|
+| iOS | `Platform.OS === "ios"` |
+| Android | `Platform.OS === "android"` |
+| Web | Default (no React Native) |
+
+Platform version is captured from:
+- **iOS/Android**: `Platform.Version`
+- **Web**: `navigator.userAgent`
+
+## Batching Strategy
+
+Errors are batched for efficiency:
+
+1. Errors are added to a queue
+2. Queue flushes when:
+   - Batch size is reached (default: 10)
+   - Flush interval expires (default: 5 seconds)
+   - Manual `flush()` is called
+   - App is closing (`destroy()` is called)
+
+## Retry Logic
+
+Failed requests are retried with exponential backoff:
+
+```
+Attempt 1: Immediate
+Attempt 2: 2 seconds delay
+Attempt 3: 4 seconds delay
+Attempt 4: 8 seconds delay
+...
+```
+
+After `maxRetries` attempts, errors are dropped (logged in debug mode).
+
+## Next Steps
+
+- [API Reference](/docs/client/api-reference) - Complete method documentation
+- [ErrorBoundary](/docs/client/error-boundary) - React error boundary setup
+- [Custom Errors](/docs/client/custom-errors) - Define your own error codes

@@ -1,0 +1,458 @@
+---
+title: Deployment
+description: Deploying the Error Ingestor server to production.
+---
+
+# Deployment
+
+Deploy the Error Ingestor server to various environments.
+
+## Deployment Options
+
+| Option | Best For | Complexity |
+|--------|----------|------------|
+| Docker | Simple self-hosted | Low |
+| Node.js | Traditional servers | Low |
+| Kubernetes | Large scale | Medium |
+| Serverless | Variable traffic | Medium |
+
+## Docker Deployment
+
+### Build Image
+
+```dockerfile
+# Dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+COPY pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build --filter server
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+COPY --from=builder /app/apps/server/dist ./dist
+COPY --from=builder /app/apps/server/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+EXPOSE 3000
+
+CMD ["node", "dist/index.js"]
+```
+
+### Docker Compose (Production)
+
+```yaml
+# docker-compose.prod.yml
+version: "3.8"
+
+services:
+  server:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CLICKHOUSE_HOST=http://clickhouse:8123
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DATABASE=error_ingestor
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=error_ingestor
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  clickhouse-data:
+```
+
+### Deploy
+
+```bash
+# Set password
+export CLICKHOUSE_PASSWORD=your-secure-password
+
+# Build and start
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+## Node.js Deployment
+
+### Build
+
+```bash
+pnpm build --filter server
+```
+
+### PM2 (Process Manager)
+
+```bash
+# Install PM2
+npm install -g pm2
+
+# Start server
+pm2 start apps/server/dist/index.js --name error-ingestor
+
+# Save process list
+pm2 save
+
+# Setup startup script
+pm2 startup
+```
+
+### PM2 Ecosystem File
+
+```javascript
+// ecosystem.config.js
+module.exports = {
+  apps: [{
+    name: 'error-ingestor',
+    script: './apps/server/dist/index.js',
+    instances: 'max',
+    exec_mode: 'cluster',
+    env_production: {
+      NODE_ENV: 'production',
+      PORT: 3000,
+      CLICKHOUSE_HOST: 'http://clickhouse:8123',
+    }
+  }]
+};
+```
+
+```bash
+pm2 start ecosystem.config.js --env production
+```
+
+## Kubernetes Deployment
+
+### Deployment
+
+```yaml
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-ingestor
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: error-ingestor
+  template:
+    metadata:
+      labels:
+        app: error-ingestor
+    spec:
+      containers:
+        - name: server
+          image: your-registry/error-ingestor:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: error-ingestor-secrets
+                  key: clickhouse-host
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: error-ingestor-secrets
+                  key: clickhouse-password
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+```
+
+### Service
+
+```yaml
+# k8s/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-ingestor
+spec:
+  selector:
+    app: error-ingestor
+  ports:
+    - port: 80
+      targetPort: 3000
+  type: ClusterIP
+```
+
+### Ingress
+
+```yaml
+# k8s/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: error-ingestor
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+    - hosts:
+        - errors.yourdomain.com
+      secretName: error-ingestor-tls
+  rules:
+    - host: errors.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: error-ingestor
+                port:
+                  number: 80
+```
+
+## Serverless Deployment
+
+### Cloudflare Workers
+
+The Hono framework supports Cloudflare Workers:
+
+```typescript
+// workers/index.ts
+import { app } from "../apps/server/src/index";
+
+export default app;
+```
+
+```toml
+# wrangler.toml
+name = "error-ingestor"
+main = "workers/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+CLICKHOUSE_HOST = "https://your-clickhouse.cloud"
+```
+
+### Vercel
+
+```json
+// vercel.json
+{
+  "functions": {
+    "api/**/*.ts": {
+      "memory": 256,
+      "maxDuration": 10
+    }
+  }
+}
+```
+
+## Environment Configuration
+
+### Required Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CLICKHOUSE_HOST` | ClickHouse server URL |
+| `CLICKHOUSE_USER` | Database username |
+| `CLICKHOUSE_PASSWORD` | Database password |
+| `CLICKHOUSE_DATABASE` | Database name |
+
+### Optional Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `NODE_ENV` | `development` | Environment |
+
+### Secrets Management
+
+Use environment-specific secrets:
+
+```bash
+# Kubernetes
+kubectl create secret generic error-ingestor-secrets \
+  --from-literal=clickhouse-host=https://clickhouse.example.com \
+  --from-literal=clickhouse-password=secret
+
+# Docker
+docker secret create clickhouse_password password.txt
+```
+
+## ClickHouse in Production
+
+### Managed Options
+
+| Provider | Service |
+|----------|---------|
+| ClickHouse | ClickHouse Cloud |
+| AWS | Self-managed on EC2 |
+| GCP | Self-managed on GCE |
+| Aiven | Managed ClickHouse |
+
+### ClickHouse Cloud Setup
+
+1. Create account at cloud.clickhouse.com
+2. Create a service
+3. Get connection details
+4. Update environment variables:
+
+```env
+CLICKHOUSE_HOST=https://xxx.clickhouse.cloud:8443
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=your-password
+CLICKHOUSE_DATABASE=error_ingestor
+```
+
+## Reverse Proxy
+
+### Nginx
+
+```nginx
+upstream error_ingestor {
+    server 127.0.0.1:3000;
+    keepalive 64;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name errors.yourdomain.com;
+
+    ssl_certificate /etc/ssl/certs/cert.pem;
+    ssl_certificate_key /etc/ssl/private/key.pem;
+
+    location / {
+        proxy_pass http://error_ingestor;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+    location /api/ {
+        limit_req zone=api burst=200 nodelay;
+        proxy_pass http://error_ingestor;
+    }
+}
+```
+
+### Caddy
+
+```caddyfile
+errors.yourdomain.com {
+    reverse_proxy localhost:3000
+
+    # Rate limiting with caddy-ratelimit plugin
+    rate_limit {
+        zone api {
+            key {remote_host}
+            events 100
+            window 1s
+        }
+    }
+}
+```
+
+## Health Checks
+
+### Liveness Probe
+
+Checks if server is running:
+
+```
+GET /health/live
+```
+
+### Readiness Probe
+
+Checks if server can handle traffic:
+
+```
+GET /health/ready
+```
+
+### Full Health Check
+
+Includes database status:
+
+```
+GET /health
+```
+
+## Monitoring
+
+### Prometheus Metrics
+
+Add Prometheus middleware:
+
+```typescript
+import { prometheus } from "@hono/prometheus";
+
+app.use("*", prometheus());
+```
+
+### Logging
+
+The server uses Hono's built-in logger. For production, consider:
+
+- Structured logging (JSON)
+- Log aggregation (ELK, Loki)
+- Error alerting
+
+## Security Checklist
+
+- [ ] Use HTTPS in production
+- [ ] Set secure ClickHouse password
+- [ ] Configure CORS appropriately
+- [ ] Enable rate limiting
+- [ ] Use secrets management
+- [ ] Regular security updates
+- [ ] Monitor for unusual activity

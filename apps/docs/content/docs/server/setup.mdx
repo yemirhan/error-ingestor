@@ -1,0 +1,261 @@
+---
+title: Server Setup
+description: Setting up the Error Ingestor server and ClickHouse database.
+---
+
+# Server Setup
+
+Set up the Error Ingestor API server with ClickHouse for error storage.
+
+## Prerequisites
+
+- Node.js 18+
+- Docker and Docker Compose (for ClickHouse)
+- pnpm (recommended) or npm
+
+## Quick Start
+
+### 1. Clone and Install
+
+```bash
+git clone https://github.com/your-repo/error-ingestor.git
+cd error-ingestor
+pnpm install
+```
+
+### 2. Start ClickHouse
+
+```bash
+docker compose up -d
+```
+
+This starts ClickHouse on port 8123.
+
+### 3. Configure Environment
+
+```bash
+cp apps/server/.env.example apps/server/.env
+```
+
+Edit `.env`:
+
+```env
+PORT=3000
+CLICKHOUSE_HOST=http://localhost:8123
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=error_ingestor
+```
+
+### 4. Initialize Database
+
+```bash
+pnpm --filter server run db:setup
+```
+
+This creates the `error_events` table in ClickHouse.
+
+### 5. Start Server
+
+```bash
+pnpm dev --filter server
+```
+
+Server runs at http://localhost:3000
+
+## Docker Compose Configuration
+
+The included `docker-compose.yml`:
+
+```yaml
+version: "3.8"
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: error-ingestor-clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native interface
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: error_ingestor
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  clickhouse-data:
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `CLICKHOUSE_HOST` | `http://localhost:8123` | ClickHouse HTTP URL |
+| `CLICKHOUSE_USER` | `default` | ClickHouse username |
+| `CLICKHOUSE_PASSWORD` | (empty) | ClickHouse password |
+| `CLICKHOUSE_DATABASE` | `error_ingestor` | Database name |
+
+## Database Schema
+
+The server creates this table:
+
+```sql
+CREATE TABLE IF NOT EXISTS error_events (
+    id UUID,
+    code LowCardinality(String),
+    message String,
+    stack_trace String,
+    app_id LowCardinality(String),
+    app_version String,
+    platform LowCardinality(String),
+    platform_version String,
+    user_id Nullable(String),
+    timestamp DateTime64(3),
+    metadata String,
+    tags Map(String, String)
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (app_id, timestamp, id)
+TTL timestamp + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+```
+
+### Schema Details
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Unique error ID |
+| `code` | LowCardinality(String) | Error code (optimized for repeated values) |
+| `message` | String | Error message |
+| `stack_trace` | String | Stack trace |
+| `app_id` | LowCardinality(String) | Application ID |
+| `app_version` | String | Application version |
+| `platform` | LowCardinality(String) | ios, android, or web |
+| `platform_version` | String | Platform version |
+| `user_id` | Nullable(String) | User identifier |
+| `timestamp` | DateTime64(3) | Millisecond precision timestamp |
+| `metadata` | String | JSON-encoded metadata |
+| `tags` | Map(String, String) | Key-value tags |
+
+### Optimizations
+
+- **LowCardinality**: Used for columns with repeated values (code, app_id, platform)
+- **Partitioning**: By month for efficient data management
+- **TTL**: Automatic deletion after 90 days
+- **Ordering**: Optimized for app_id + timestamp queries
+
+## Verify Setup
+
+### Check ClickHouse
+
+```bash
+curl http://localhost:8123/ping
+# Returns: Ok.
+```
+
+### Check Server Health
+
+```bash
+curl http://localhost:3000/health
+```
+
+Response:
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "services": {
+    "clickhouse": "up"
+  }
+}
+```
+
+### Test API Key
+
+```bash
+curl http://localhost:3000/api/v1/ingest/test \
+  -H "X-API-Key: ei_test_key_12345"
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "appId": "test-app",
+  "appName": "Test Application"
+}
+```
+
+## Production Considerations
+
+### ClickHouse in Production
+
+For production, consider:
+
+1. **Managed ClickHouse**: Use ClickHouse Cloud or self-hosted cluster
+2. **Authentication**: Set strong passwords
+3. **TLS**: Enable HTTPS for ClickHouse connections
+4. **Backups**: Configure regular backups
+5. **Monitoring**: Set up metrics and alerting
+
+### Server Scaling
+
+- The server is stateless and can be horizontally scaled
+- Use a load balancer for multiple instances
+- Consider rate limiting for public endpoints
+
+## Troubleshooting
+
+### ClickHouse Connection Failed
+
+```bash
+# Check if ClickHouse is running
+docker compose ps
+
+# Check logs
+docker compose logs clickhouse
+
+# Restart
+docker compose restart clickhouse
+```
+
+### Port Already in Use
+
+```bash
+# Change port in .env
+PORT=3001
+
+# Or find and kill process using port 3000
+lsof -i :3000
+kill -9 <PID>
+```
+
+### Database Not Created
+
+```bash
+# Manually run setup
+pnpm --filter server run db:setup
+
+# Or via ClickHouse client
+docker compose exec clickhouse clickhouse-client
+
+# Then run:
+CREATE DATABASE IF NOT EXISTS error_ingestor;
+```
+
+## Next Steps
+
+- [API Endpoints](/docs/server/api-endpoints) - Complete API reference
+- [Authentication](/docs/server/authentication) - API key management
+- [Deployment](/docs/server/deployment) - Production deployment options

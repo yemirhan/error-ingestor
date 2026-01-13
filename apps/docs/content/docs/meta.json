@@ -1,0 +1,31 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "---Getting Started---",
+    "getting-started/installation",
+    "getting-started/quick-start",
+    "getting-started/configuration",
+    "---Client SDK---",
+    "client/overview",
+    "client/api-reference",
+    "client/error-boundary",
+    "client/custom-errors",
+    "client/neverthrow",
+    "---Integrations---",
+    "integrations/react",
+    "integrations/react-native",
+    "integrations/nextjs",
+    "---Server---",
+    "server/setup",
+    "server/api-endpoints",
+    "server/authentication",
+    "server/database",
+    "server/deployment",
+    "---Dashboard---",
+    "dashboard/overview",
+    "---Architecture---",
+    "architecture/overview",
+    "architecture/data-flow"
+  ]
+}

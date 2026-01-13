@@ -1,0 +1,210 @@
+---
+title: Configuration
+description: All configuration options for the Error Ingestor client SDK.
+---
+
+# Configuration
+
+Configure Error Ingestor to match your application's needs.
+
+## Configuration Options
+
+The `init()` method accepts a configuration object with the following options:
+
+```typescript
+interface ErrorIngestorConfig {
+  // Required
+  apiKey: string;
+  appId: string;
+  appVersion: string;
+  endpoint: string;
+
+  // Optional
+  userId?: string;
+  batchSize?: number;      // Default: 10
+  flushInterval?: number;  // Default: 5000 (ms)
+  maxRetries?: number;     // Default: 3
+  debug?: boolean;         // Default: false
+}
+```
+
+## Required Options
+
+### apiKey
+
+Your API key for authentication with the Error Ingestor server.
+
+```typescript
+apiKey: "ei_your_api_key_here"
+```
+
+### appId
+
+A unique identifier for your application. This is used to group errors by application in the dashboard.
+
+```typescript
+appId: "my-mobile-app"
+```
+
+### appVersion
+
+The current version of your application. Helps track which versions have issues.
+
+```typescript
+appVersion: "1.2.3"
+```
+
+### endpoint
+
+The URL of your Error Ingestor server.
+
+```typescript
+endpoint: "https://errors.yourdomain.com"
+```
+
+## Optional Options
+
+### userId
+
+Set an initial user ID for error tracking. Can be updated later with `setUserId()`.
+
+```typescript
+userId: "user-123"
+```
+
+### batchSize
+
+Number of errors to collect before sending to the server. Default is `10`.
+
+```typescript
+batchSize: 20  // Send when 20 errors are queued
+```
+
+### flushInterval
+
+Time in milliseconds between automatic flushes. Default is `5000` (5 seconds).
+
+```typescript
+flushInterval: 10000  // Flush every 10 seconds
+```
+
+### maxRetries
+
+Maximum number of retry attempts for failed requests. Default is `3`.
+
+```typescript
+maxRetries: 5  // Retry up to 5 times
+```
+
+### debug
+
+Enable debug logging to the console. Useful during development.
+
+```typescript
+debug: true  // Log debug messages
+```
+
+## Environment-Based Configuration
+
+Use environment variables for different environments:
+
+### React (Create React App)
+
+```typescript
+ErrorIngestor.init({
+  apiKey: process.env.REACT_APP_ERROR_INGESTOR_API_KEY!,
+  appId: process.env.REACT_APP_ERROR_INGESTOR_APP_ID!,
+  appVersion: process.env.REACT_APP_VERSION!,
+  endpoint: process.env.REACT_APP_ERROR_INGESTOR_ENDPOINT!,
+  debug: process.env.NODE_ENV === "development",
+});
+```
+
+### Next.js
+
+```typescript
+ErrorIngestor.init({
+  apiKey: process.env.NEXT_PUBLIC_ERROR_INGESTOR_API_KEY!,
+  appId: process.env.NEXT_PUBLIC_ERROR_INGESTOR_APP_ID!,
+  appVersion: process.env.NEXT_PUBLIC_APP_VERSION!,
+  endpoint: process.env.NEXT_PUBLIC_ERROR_INGESTOR_ENDPOINT!,
+  debug: process.env.NODE_ENV === "development",
+});
+```
+
+### React Native (Expo)
+
+```typescript
+import Constants from "expo-constants";
+
+ErrorIngestor.init({
+  apiKey: Constants.expoConfig?.extra?.errorIngestorApiKey,
+  appId: Constants.expoConfig?.extra?.errorIngestorAppId,
+  appVersion: Constants.expoConfig?.version || "1.0.0",
+  endpoint: Constants.expoConfig?.extra?.errorIngestorEndpoint,
+  debug: __DEV__,
+});
+```
+
+## Tuning Performance
+
+### High-Volume Applications
+
+For apps with many errors, increase batch size and flush interval:
+
+```typescript
+ErrorIngestor.init({
+  // ...required options
+  batchSize: 50,        // Collect more before sending
+  flushInterval: 30000, // Flush every 30 seconds
+});
+```
+
+### Critical Applications
+
+For apps where every error matters, decrease batch size:
+
+```typescript
+ErrorIngestor.init({
+  // ...required options
+  batchSize: 1,        // Send immediately
+  flushInterval: 1000, // Check every second
+  maxRetries: 10,      // More retry attempts
+});
+```
+
+## Validation
+
+The `init()` method validates your configuration and returns a `Result` type:
+
+```typescript
+const result = ErrorIngestor.init(config);
+
+if (result.isErr()) {
+  console.error("Configuration error:", result.error.message);
+  // Handle invalid configuration
+}
+```
+
+Common validation errors:
+
+- Missing required fields
+- Invalid endpoint URL
+- Already initialized (call `destroy()` first)
+
+## Re-initialization
+
+To change configuration at runtime, first destroy the existing instance:
+
+```typescript
+// Destroy existing instance
+await ErrorIngestor.destroy();
+
+// Initialize with new config
+ErrorIngestor.init(newConfig);
+```
+
+## Next Steps
+
+- [API Reference](/docs/client/api-reference) - Learn about all available methods
+- [Error Boundary](/docs/client/error-boundary) - Set up automatic error catching

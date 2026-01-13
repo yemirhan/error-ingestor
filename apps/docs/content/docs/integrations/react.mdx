@@ -1,0 +1,399 @@
+---
+title: React Integration
+description: Integrating Error Ingestor with React applications.
+---
+
+# React Integration
+
+Set up error tracking in your React application.
+
+## Installation
+
+```bash
+npm install @error-ingestor/client
+```
+
+## Basic Setup
+
+### 1. Initialize at App Entry
+
+```tsx
+// src/index.tsx or src/main.tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { ErrorIngestor } from "@error-ingestor/client";
+import App from "./App";
+
+// Initialize before rendering
+ErrorIngestor.init({
+  apiKey: import.meta.env.VITE_ERROR_INGESTOR_API_KEY,
+  appId: "my-react-app",
+  appVersion: import.meta.env.VITE_APP_VERSION || "1.0.0",
+  endpoint: import.meta.env.VITE_ERROR_INGESTOR_ENDPOINT,
+  debug: import.meta.env.DEV,
+});
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+### 2. Add Root Error Boundary
+
+```tsx
+// src/App.tsx
+import { ErrorBoundary } from "@error-ingestor/client";
+import { ErrorFallback } from "./components/ErrorFallback";
+
+function App() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <ErrorFallback error={error} onReset={reset} />
+      )}
+    >
+      <Router>
+        <Routes />
+      </Router>
+    </ErrorBoundary>
+  );
+}
+```
+
+### 3. Create Error Fallback Component
+
+```tsx
+// src/components/ErrorFallback.tsx
+interface ErrorFallbackProps {
+  error: Error;
+  onReset: () => void;
+}
+
+export function ErrorFallback({ error, onReset }: ErrorFallbackProps) {
+  return (
+    <div className="error-page">
+      <h1>Something went wrong</h1>
+      <p>{error.message}</p>
+      <button onClick={onReset}>Try Again</button>
+      <button onClick={() => window.location.href = "/"}>
+        Go Home
+      </button>
+    </div>
+  );
+}
+```
+
+## Environment Variables
+
+### Vite
+
+```env
+# .env
+VITE_ERROR_INGESTOR_API_KEY=your-api-key
+VITE_ERROR_INGESTOR_ENDPOINT=https://errors.yourdomain.com
+VITE_ERROR_INGESTOR_APP_ID=my-react-app
+VITE_APP_VERSION=1.0.0
+```
+
+### Create React App
+
+```env
+# .env
+REACT_APP_ERROR_INGESTOR_API_KEY=your-api-key
+REACT_APP_ERROR_INGESTOR_ENDPOINT=https://errors.yourdomain.com
+REACT_APP_ERROR_INGESTOR_APP_ID=my-react-app
+REACT_APP_VERSION=1.0.0
+```
+
+## Capturing Errors
+
+### In Event Handlers
+
+```tsx
+function Button() {
+  const handleClick = async () => {
+    try {
+      await performAction();
+    } catch (error) {
+      ErrorIngestor.capture(error as Error, {
+        tags: { component: "Button", action: "click" },
+      });
+      // Show user-friendly error
+      toast.error("Action failed. Please try again.");
+    }
+  };
+
+  return <button onClick={handleClick}>Perform Action</button>;
+}
+```
+
+### In useEffect
+
+```tsx
+function DataComponent() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const response = await fetch("/api/data");
+        setData(await response.json());
+      } catch (err) {
+        const error = err as Error;
+        ErrorIngestor.capture(error, {
+          tags: { component: "DataComponent", operation: "fetch" },
+        });
+        setError(error);
+      }
+    }
+    fetchData();
+  }, []);
+
+  if (error) return <div>Error: {error.message}</div>;
+  if (!data) return <div>Loading...</div>;
+  return <div>{/* Render data */}</div>;
+}
+```
+
+### Custom Hook for Error Handling
+
+```tsx
+// src/hooks/useErrorHandler.ts
+import { useCallback } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function useErrorHandler() {
+  const captureError = useCallback(
+    (error: Error, context?: { tags?: Record<string, string>; metadata?: Record<string, unknown> }) => {
+      ErrorIngestor.capture(error, {
+        tags: context?.tags,
+        metadata: context?.metadata,
+      });
+    },
+    []
+  );
+
+  const wrapAsync = useCallback(
+    <T>(
+      fn: () => Promise<T>,
+      context?: { tags?: Record<string, string> }
+    ): (() => Promise<T | undefined>) => {
+      return async () => {
+        try {
+          return await fn();
+        } catch (error) {
+          captureError(error as Error, context);
+          return undefined;
+        }
+      };
+    },
+    [captureError]
+  );
+
+  return { captureError, wrapAsync };
+}
+
+// Usage
+function MyComponent() {
+  const { captureError, wrapAsync } = useErrorHandler();
+
+  const handleSubmit = wrapAsync(
+    async () => {
+      await submitForm(data);
+    },
+    { tags: { form: "contact" } }
+  );
+
+  return <form onSubmit={handleSubmit}>...</form>;
+}
+```
+
+## User Tracking
+
+### With Authentication
+
+```tsx
+// src/contexts/AuthContext.tsx
+import { createContext, useContext, useEffect, useState } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+interface AuthContextType {
+  user: User | null;
+  login: (credentials: Credentials) => Promise<void>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  const login = async (credentials: Credentials) => {
+    const user = await authService.login(credentials);
+    setUser(user);
+
+    // Set user ID for error tracking
+    ErrorIngestor.setUserId(user.id);
+  };
+
+  const logout = () => {
+    authService.logout();
+    setUser(null);
+
+    // Clear user ID
+    ErrorIngestor.setUserId(null);
+  };
+
+  // Restore user session
+  useEffect(() => {
+    const storedUser = authService.getCurrentUser();
+    if (storedUser) {
+      setUser(storedUser);
+      ErrorIngestor.setUserId(storedUser.id);
+    }
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+```
+
+## Route-Level Error Boundaries
+
+### React Router v6
+
+```tsx
+// src/routes/index.tsx
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { ErrorBoundary } from "@error-ingestor/client";
+
+function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <div className="route-error">
+          <h2>Page Error</h2>
+          <p>{error.message}</p>
+          <button onClick={reset}>Retry</button>
+        </div>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: (
+      <RouteErrorBoundary>
+        <HomePage />
+      </RouteErrorBoundary>
+    ),
+  },
+  {
+    path: "/dashboard",
+    element: (
+      <RouteErrorBoundary>
+        <DashboardPage />
+      </RouteErrorBoundary>
+    ),
+  },
+]);
+
+export function AppRouter() {
+  return <RouterProvider router={router} />;
+}
+```
+
+## With React Query
+
+```tsx
+// src/lib/queryClient.ts
+import { QueryClient } from "@tanstack/react-query";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 3,
+      onError: (error) => {
+        ErrorIngestor.capture(error as Error, {
+          tags: { source: "react-query", type: "query" },
+        });
+      },
+    },
+    mutations: {
+      onError: (error) => {
+        ErrorIngestor.capture(error as Error, {
+          tags: { source: "react-query", type: "mutation" },
+        });
+      },
+    },
+  },
+});
+```
+
+## Complete Example Structure
+
+```
+src/
+├── components/
+│   ├── ErrorFallback.tsx
+│   └── ErrorBoundaryWrapper.tsx
+├── contexts/
+│   └── AuthContext.tsx
+├── hooks/
+│   └── useErrorHandler.ts
+├── lib/
+│   ├── errorIngestor.ts      # Init function
+│   └── errors.ts             # Custom error codes
+├── App.tsx
+└── main.tsx
+```
+
+### src/lib/errorIngestor.ts
+
+```tsx
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function initErrorTracking() {
+  const result = ErrorIngestor.init({
+    apiKey: import.meta.env.VITE_ERROR_INGESTOR_API_KEY,
+    appId: import.meta.env.VITE_ERROR_INGESTOR_APP_ID,
+    appVersion: import.meta.env.VITE_APP_VERSION || "1.0.0",
+    endpoint: import.meta.env.VITE_ERROR_INGESTOR_ENDPOINT,
+    debug: import.meta.env.DEV,
+  });
+
+  if (result.isErr()) {
+    console.error("Failed to initialize error tracking:", result.error);
+  }
+}
+```
+
+### src/main.tsx
+
+```tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { initErrorTracking } from "./lib/errorIngestor";
+import App from "./App";
+import "./index.css";
+
+// Initialize error tracking first
+initErrorTracking();
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```

@@ -1,0 +1,399 @@
+---
+title: Database
+description: ClickHouse database schema and optimization for Error Ingestor.
+---
+
+# Database
+
+Error Ingestor uses ClickHouse, a fast column-oriented database optimized for analytics workloads.
+
+## Why ClickHouse?
+
+- **Fast Aggregations** - Perfect for error trends and analytics
+- **Column Storage** - Efficient for querying specific fields
+- **Compression** - Excellent compression ratios for log data
+- **Time-Series** - Built-in support for time-based partitioning
+- **Scalable** - Handles billions of rows
+
+## Schema
+
+### error_events Table
+
+```sql
+CREATE TABLE IF NOT EXISTS error_events (
+    -- Identifiers
+    id UUID,
+    app_id LowCardinality(String),
+
+    -- Error details
+    code LowCardinality(String),
+    message String,
+    stack_trace String,
+
+    -- App info
+    app_version String,
+
+    -- Platform
+    platform LowCardinality(String),
+    platform_version String,
+
+    -- User
+    user_id Nullable(String),
+
+    -- Timing
+    timestamp DateTime64(3),
+
+    -- Flexible data
+    metadata String,
+    tags Map(String, String)
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (app_id, timestamp, id)
+TTL timestamp + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+```
+
+## Column Types
+
+### LowCardinality
+
+Used for columns with repeated values:
+
+```sql
+code LowCardinality(String)      -- ~50-100 unique codes
+app_id LowCardinality(String)    -- Few apps
+platform LowCardinality(String)  -- 3 values: ios, android, web
+```
+
+Benefits:
+- Dictionary encoding
+- Faster queries
+- Better compression
+
+### Nullable
+
+Used for optional fields:
+
+```sql
+user_id Nullable(String)  -- Not all errors have user IDs
+```
+
+### DateTime64
+
+Millisecond precision timestamps:
+
+```sql
+timestamp DateTime64(3)  -- 3 = milliseconds
+```
+
+### Map
+
+Flexible key-value storage:
+
+```sql
+tags Map(String, String)  -- Dynamic tags
+```
+
+Query maps:
+
+```sql
+SELECT * FROM error_events
+WHERE tags['environment'] = 'production';
+```
+
+### String for JSON
+
+Metadata stored as JSON string:
+
+```sql
+metadata String  -- JSON: {"key": "value"}
+```
+
+Query with JSON functions:
+
+```sql
+SELECT
+  JSONExtractString(metadata, 'endpoint') as endpoint
+FROM error_events
+WHERE JSONExtractInt(metadata, 'retryCount') > 3;
+```
+
+## Partitioning
+
+Data is partitioned by month:
+
+```sql
+PARTITION BY toYYYYMM(timestamp)
+```
+
+Benefits:
+- Efficient time-range queries
+- Easy data deletion (drop partition)
+- Parallel query execution
+
+### Managing Partitions
+
+```sql
+-- View partitions
+SELECT partition, count() as rows
+FROM system.parts
+WHERE table = 'error_events'
+GROUP BY partition
+ORDER BY partition;
+
+-- Drop old partition
+ALTER TABLE error_events DROP PARTITION '202301';
+```
+
+## Ordering
+
+Data is ordered for query optimization:
+
+```sql
+ORDER BY (app_id, timestamp, id)
+```
+
+This optimizes:
+- Queries filtered by `app_id`
+- Time-range queries within an app
+- Unique lookups by `id`
+
+## TTL (Time-To-Live)
+
+Automatic data expiration:
+
+```sql
+TTL timestamp + INTERVAL 90 DAY
+```
+
+After 90 days, data is automatically deleted.
+
+### Changing TTL
+
+```sql
+-- Extend to 180 days
+ALTER TABLE error_events
+MODIFY TTL timestamp + INTERVAL 180 DAY;
+
+-- Remove TTL (keep forever)
+ALTER TABLE error_events
+REMOVE TTL;
+```
+
+## Indexes
+
+### Primary Index
+
+Created automatically from ORDER BY:
+
+```
+app_id -> timestamp -> id
+```
+
+### Skip Indexes (Optional)
+
+Add indexes for frequently filtered columns:
+
+```sql
+-- Index on error code
+ALTER TABLE error_events
+ADD INDEX idx_code code TYPE set(100) GRANULARITY 4;
+
+-- Index on user_id
+ALTER TABLE error_events
+ADD INDEX idx_user user_id TYPE bloom_filter GRANULARITY 4;
+```
+
+## Common Queries
+
+### Error Count by Code
+
+```sql
+SELECT
+  code,
+  count() as count
+FROM error_events
+WHERE app_id = 'my-app'
+  AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY code
+ORDER BY count DESC
+LIMIT 10;
+```
+
+### Hourly Trend
+
+```sql
+SELECT
+  toStartOfHour(timestamp) as hour,
+  count() as count,
+  uniqExact(code) as unique_codes,
+  uniqExact(user_id) as affected_users
+FROM error_events
+WHERE app_id = 'my-app'
+  AND timestamp >= now() - INTERVAL 7 DAY
+GROUP BY hour
+ORDER BY hour;
+```
+
+### Recent Errors
+
+```sql
+SELECT *
+FROM error_events
+WHERE app_id = 'my-app'
+ORDER BY timestamp DESC
+LIMIT 100;
+```
+
+### Errors by User
+
+```sql
+SELECT
+  user_id,
+  count() as error_count,
+  max(timestamp) as last_error
+FROM error_events
+WHERE app_id = 'my-app'
+  AND user_id IS NOT NULL
+  AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY user_id
+ORDER BY error_count DESC
+LIMIT 20;
+```
+
+### Search by Message
+
+```sql
+SELECT *
+FROM error_events
+WHERE app_id = 'my-app'
+  AND message LIKE '%connection%'
+ORDER BY timestamp DESC
+LIMIT 50;
+```
+
+## Performance Tips
+
+### Use Approximate Functions
+
+For large datasets, use approximate counts:
+
+```sql
+-- Exact (slower)
+SELECT uniqExact(user_id) FROM error_events;
+
+-- Approximate (faster)
+SELECT uniq(user_id) FROM error_events;
+```
+
+### Limit Time Ranges
+
+Always filter by time:
+
+```sql
+-- Good
+WHERE timestamp >= now() - INTERVAL 7 DAY
+
+-- Bad (scans all data)
+WHERE code = 'NETWORK_ERROR'
+```
+
+### Avoid SELECT *
+
+Select only needed columns:
+
+```sql
+-- Good
+SELECT id, code, message, timestamp FROM error_events;
+
+-- Bad
+SELECT * FROM error_events;
+```
+
+## Maintenance
+
+### Optimize Table
+
+Merge small parts after bulk inserts:
+
+```sql
+OPTIMIZE TABLE error_events FINAL;
+```
+
+### Check Table Size
+
+```sql
+SELECT
+  formatReadableSize(sum(bytes)) as size,
+  sum(rows) as rows
+FROM system.parts
+WHERE table = 'error_events' AND active;
+```
+
+### View Part Statistics
+
+```sql
+SELECT
+  partition,
+  count() as parts,
+  sum(rows) as rows,
+  formatReadableSize(sum(bytes)) as size
+FROM system.parts
+WHERE table = 'error_events' AND active
+GROUP BY partition
+ORDER BY partition DESC;
+```
+
+## Backup & Restore
+
+### Backup
+
+```bash
+# Using clickhouse-backup tool
+clickhouse-backup create error_ingestor_backup
+
+# Or export to file
+clickhouse-client --query="SELECT * FROM error_events FORMAT Native" > backup.native
+```
+
+### Restore
+
+```bash
+# Using clickhouse-backup
+clickhouse-backup restore error_ingestor_backup
+
+# Or import from file
+clickhouse-client --query="INSERT INTO error_events FORMAT Native" < backup.native
+```
+
+## Monitoring
+
+### Query Performance
+
+```sql
+SELECT
+  query,
+  read_rows,
+  read_bytes,
+  result_rows,
+  query_duration_ms
+FROM system.query_log
+WHERE query LIKE '%error_events%'
+ORDER BY event_time DESC
+LIMIT 10;
+```
+
+### Storage Metrics
+
+```sql
+SELECT
+  database,
+  table,
+  formatReadableSize(sum(bytes_on_disk)) as disk_size,
+  sum(rows) as rows
+FROM system.parts
+WHERE active
+GROUP BY database, table
+ORDER BY sum(bytes_on_disk) DESC;
+```

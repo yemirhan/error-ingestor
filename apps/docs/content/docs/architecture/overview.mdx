@@ -1,0 +1,343 @@
+---
+title: Architecture Overview
+description: System architecture and design of Error Ingestor.
+---
+
+# Architecture Overview
+
+Error Ingestor is designed as a modular, self-hosted error tracking system with four main components.
+
+## System Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Client Applications                           │
+│                                                                      │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐            │
+│  │  React Web   │   │ React Native │   │   Next.js    │            │
+│  │     App      │   │     App      │   │     App      │            │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘            │
+│         │                  │                  │                     │
+│         └──────────────────┼──────────────────┘                     │
+│                            │                                        │
+│              ┌─────────────▼─────────────┐                         │
+│              │   @error-ingestor/client  │                         │
+│              │      (Client SDK)         │                         │
+│              └─────────────┬─────────────┘                         │
+└────────────────────────────┼────────────────────────────────────────┘
+                             │
+                             │ HTTPS POST /api/v1/ingest
+                             │ (Batched errors with API key)
+                             │
+┌────────────────────────────▼────────────────────────────────────────┐
+│                        API Server                                    │
+│                                                                      │
+│              ┌─────────────────────────────┐                        │
+│              │     Hono Web Framework      │                        │
+│              │                             │                        │
+│              │  ┌───────────────────────┐  │                        │
+│              │  │   Authentication      │  │                        │
+│              │  │   (API Key Validation)│  │                        │
+│              │  └───────────┬───────────┘  │                        │
+│              │              │              │                        │
+│              │  ┌───────────▼───────────┐  │                        │
+│              │  │   Request Validation  │  │                        │
+│              │  │   (Zod Schemas)       │  │                        │
+│              │  └───────────┬───────────┘  │                        │
+│              │              │              │                        │
+│              │  ┌───────────▼───────────┐  │                        │
+│              │  │   ClickHouse Client   │  │                        │
+│              │  │   (Direct Insert)     │  │                        │
+│              │  └───────────┬───────────┘  │                        │
+│              └──────────────┼──────────────┘                        │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                             │ SQL Insert
+                             │
+┌────────────────────────────▼────────────────────────────────────────┐
+│                       ClickHouse                                     │
+│                                                                      │
+│              ┌─────────────────────────────┐                        │
+│              │      error_events table     │                        │
+│              │                             │                        │
+│              │  - Columnar storage         │                        │
+│              │  - Monthly partitioning     │                        │
+│              │  - 90-day TTL               │                        │
+│              │  - LowCardinality columns   │                        │
+│              └─────────────────────────────┘                        │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                             │ SQL Queries
+                             │
+┌────────────────────────────▼────────────────────────────────────────┐
+│                        Dashboard                                     │
+│                                                                      │
+│              ┌─────────────────────────────┐                        │
+│              │      React Application      │                        │
+│              │                             │                        │
+│              │  ┌─────────────────────┐    │                        │
+│              │  │   Error List View   │    │                        │
+│              │  └─────────────────────┘    │                        │
+│              │  ┌─────────────────────┐    │                        │
+│              │  │   Trends & Charts   │    │                        │
+│              │  └─────────────────────┘    │                        │
+│              │  ┌─────────────────────┐    │                        │
+│              │  │   Error Details     │    │                        │
+│              │  └─────────────────────┘    │                        │
+│              └─────────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Components
+
+### 1. Client SDK (`@error-ingestor/client`)
+
+The client-side library that runs in your application.
+
+**Responsibilities:**
+- Capture errors (manual and automatic)
+- Queue errors for batching
+- Retry failed requests
+- Platform detection
+- Global error handlers
+
+**Key Classes:**
+- `ErrorIngestor` - Main singleton
+- `ErrorBoundary` - React error boundary
+- `ErrorQueue` - Batching and retry logic
+- `AppError` - Custom error class
+
+### 2. Shared Package (`@error-ingestor/shared`)
+
+Common types and utilities shared between client and server.
+
+**Contents:**
+- TypeScript interfaces
+- Zod schemas for validation
+- Error codes and constants
+
+### 3. API Server (`@error-ingestor/server`)
+
+The backend service that receives and stores errors.
+
+**Responsibilities:**
+- Authenticate requests (API keys)
+- Validate incoming data
+- Store errors in ClickHouse
+- Serve dashboard API endpoints
+
+**Tech Stack:**
+- Hono (web framework)
+- ClickHouse client
+- Zod (validation)
+
+### 4. Dashboard (`@error-ingestor/dashboard`)
+
+Web interface for viewing and analyzing errors.
+
+**Responsibilities:**
+- Display error list with filtering
+- Show error details and stack traces
+- Visualize trends and patterns
+- Provide search and navigation
+
+**Tech Stack:**
+- React 18
+- TanStack Query
+- Recharts
+- Tailwind CSS
+
+## Data Flow
+
+### Error Capture Flow
+
+```
+1. Error occurs in application
+         │
+         ▼
+2. ErrorIngestor.capture() called
+   (manually or via ErrorBoundary)
+         │
+         ▼
+3. Error added to queue
+         │
+         ▼
+4. Queue checks batch size/interval
+         │
+         ├──▶ Not ready: Wait
+         │
+         ▼
+5. Batch ready: Send HTTP POST
+   to /api/v1/ingest
+         │
+         ▼
+6. Server validates API key
+         │
+         ├──▶ Invalid: Return 401
+         │
+         ▼
+7. Server validates payload
+         │
+         ├──▶ Invalid: Return 400
+         │
+         ▼
+8. Server inserts to ClickHouse
+         │
+         ▼
+9. Return success response
+         │
+         ▼
+10. Client clears sent errors
+    from queue
+```
+
+### Query Flow (Dashboard)
+
+```
+1. User opens dashboard
+         │
+         ▼
+2. React app loads
+         │
+         ▼
+3. Fetch /dashboard/api/errors
+         │
+         ▼
+4. Server queries ClickHouse
+   SELECT * FROM error_events
+   WHERE app_id = ?
+   ORDER BY timestamp DESC
+         │
+         ▼
+5. Return JSON response
+         │
+         ▼
+6. Dashboard renders error list
+```
+
+## Design Decisions
+
+### Why Direct Insert (vs Message Queue)?
+
+We chose direct ClickHouse inserts over a message queue (like Kafka) for simplicity:
+
+| Direct Insert | Message Queue |
+|---------------|---------------|
+| Simpler architecture | More complex |
+| Fewer dependencies | Requires Kafka/Redis |
+| Lower latency | Higher throughput |
+| Good for small-medium scale | Better for huge scale |
+
+For most use cases, direct insert performs well. Add a queue if you need:
+- Guaranteed delivery
+- Multi-consumer processing
+- Massive scale (millions/sec)
+
+### Why ClickHouse?
+
+| Feature | Benefit |
+|---------|---------|
+| Columnar storage | Fast aggregations |
+| Compression | Efficient storage |
+| Partitioning | Easy data management |
+| TTL | Automatic cleanup |
+| Fast queries | Real-time dashboards |
+
+### Why Hono?
+
+- Lightweight and fast
+- TypeScript-first
+- Works on Node, Deno, Bun, Workers
+- Simple middleware pattern
+- Excellent developer experience
+
+## Scalability
+
+### Horizontal Scaling
+
+```
+                    Load Balancer
+                         │
+           ┌─────────────┼─────────────┐
+           │             │             │
+           ▼             ▼             ▼
+      ┌─────────┐   ┌─────────┐   ┌─────────┐
+      │ Server  │   │ Server  │   │ Server  │
+      │   #1    │   │   #2    │   │   #3    │
+      └────┬────┘   └────┬────┘   └────┬────┘
+           │             │             │
+           └─────────────┼─────────────┘
+                         │
+                         ▼
+                   ┌───────────┐
+                   │ClickHouse │
+                   │  Cluster  │
+                   └───────────┘
+```
+
+- Servers are stateless
+- Load balance across instances
+- ClickHouse handles the load
+
+### ClickHouse Clustering
+
+For very high scale, use ClickHouse cluster:
+
+```
+┌─────────────────────────────────────┐
+│         ClickHouse Cluster          │
+│                                     │
+│  ┌─────────┐  ┌─────────┐          │
+│  │ Shard 1 │  │ Shard 2 │  ...     │
+│  │         │  │         │          │
+│  │ Node A  │  │ Node A  │          │
+│  │ Node B  │  │ Node B  │          │
+│  └─────────┘  └─────────┘          │
+└─────────────────────────────────────┘
+```
+
+## Security Architecture
+
+### Authentication Flow
+
+```
+Client Request
+      │
+      ▼
+┌─────────────────┐
+│ X-API-Key Header│
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Hash API Key   │
+│   (SHA-256)     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Lookup in Store │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+ Found    Not Found
+    │         │
+    ▼         ▼
+Set Context  Return
+ (appId)      401
+    │
+    ▼
+ Continue
+```
+
+### Data Protection
+
+| Layer | Protection |
+|-------|------------|
+| Transport | HTTPS/TLS |
+| Authentication | API key per app |
+| Authorization | App ID validation |
+| Storage | ClickHouse security |
+| Data Lifecycle | 90-day TTL |

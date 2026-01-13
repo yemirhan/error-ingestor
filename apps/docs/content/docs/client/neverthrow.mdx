@@ -1,0 +1,366 @@
+---
+title: Neverthrow Integration
+description: Using Error Ingestor with the Neverthrow Result pattern.
+---
+
+# Neverthrow Integration
+
+Error Ingestor integrates seamlessly with [Neverthrow](https://github.com/supermacro/neverthrow), a type-safe error handling library for TypeScript.
+
+## What is Neverthrow?
+
+Neverthrow provides `Result` and `ResultAsync` types that make error handling explicit:
+
+```typescript
+import { Result, ok, err } from "neverthrow";
+
+function divide(a: number, b: number): Result<number, Error> {
+  if (b === 0) {
+    return err(new Error("Cannot divide by zero"));
+  }
+  return ok(a / b);
+}
+```
+
+## Why Use Neverthrow?
+
+- **Type-safe** - Errors are part of the type signature
+- **No exceptions** - Errors are values, not thrown
+- **Composable** - Chain operations with `map`, `andThen`, etc.
+- **Explicit** - You must handle both success and error cases
+
+## SDK Returns Result Types
+
+Error Ingestor methods return `Result` types:
+
+```typescript
+// init returns Result<void, Error>
+const result = ErrorIngestor.init(config);
+
+if (result.isErr()) {
+  console.error("Init failed:", result.error);
+}
+
+// capture returns Result<void, Error>
+const captureResult = ErrorIngestor.capture(error);
+
+captureResult.match(
+  () => console.log("Error captured"),
+  (err) => console.error("Capture failed:", err)
+);
+```
+
+## Pattern: API Calls with Results
+
+Create API functions that return Results:
+
+```typescript
+import { ResultAsync, errAsync, okAsync } from "neverthrow";
+import { AppError, ErrorIngestor } from "@error-ingestor/client";
+import { MyErrorCodes } from "./errors";
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export function fetchUser(userId: string): ResultAsync<User, AppError> {
+  return ResultAsync.fromPromise(
+    fetch(`/api/users/${userId}`).then(async (res) => {
+      if (!res.ok) {
+        throw new AppError(
+          MyErrorCodes.FETCH_FAILED,
+          "Failed to fetch user",
+          { status: res.status, userId }
+        );
+      }
+      return res.json();
+    }),
+    (error) => {
+      // Transform unknown errors to AppError
+      if (error instanceof AppError) return error;
+      return new AppError(
+        MyErrorCodes.NETWORK_ERROR,
+        "Network request failed",
+        { originalError: String(error) }
+      );
+    }
+  );
+}
+```
+
+## Pattern: Chaining Operations
+
+Chain multiple operations that might fail:
+
+```typescript
+import { ResultAsync } from "neverthrow";
+
+function processOrder(orderId: string): ResultAsync<OrderConfirmation, AppError> {
+  return fetchOrder(orderId)
+    .andThen((order) => validateOrder(order))
+    .andThen((validOrder) => processPayment(validOrder))
+    .andThen((payment) => createConfirmation(payment));
+}
+
+// Usage with error capture
+async function handleCheckout(orderId: string) {
+  const result = await processOrder(orderId);
+
+  result.match(
+    (confirmation) => {
+      showSuccess(confirmation);
+    },
+    (error) => {
+      // Capture the error
+      ErrorIngestor.capture(error, {
+        tags: { flow: "checkout", orderId },
+      });
+      showError(error.message);
+    }
+  );
+}
+```
+
+## Pattern: Error Recovery
+
+Use `orElse` to recover from specific errors:
+
+```typescript
+function fetchUserWithFallback(userId: string): ResultAsync<User, AppError> {
+  return fetchUser(userId)
+    .orElse((error) => {
+      // Try cache on network error
+      if (error.code === MyErrorCodes.NETWORK_ERROR) {
+        return fetchUserFromCache(userId);
+      }
+      // Re-throw other errors
+      return errAsync(error);
+    });
+}
+```
+
+## Pattern: Collecting Results
+
+Handle multiple operations:
+
+```typescript
+import { ResultAsync, Result } from "neverthrow";
+
+async function loadDashboard(): Promise<
+  Result<DashboardData, AppError>
+> {
+  const results = await ResultAsync.combine([
+    fetchUser(userId),
+    fetchOrders(userId),
+    fetchNotifications(userId),
+  ]);
+
+  return results.map(([user, orders, notifications]) => ({
+    user,
+    orders,
+    notifications,
+  }));
+}
+
+// Usage
+const dashboardResult = await loadDashboard();
+
+dashboardResult.match(
+  (data) => renderDashboard(data),
+  (error) => {
+    ErrorIngestor.capture(error, {
+      tags: { page: "dashboard" },
+    });
+    showError("Failed to load dashboard");
+  }
+);
+```
+
+## Pattern: Mapping Errors
+
+Transform errors while preserving the Result type:
+
+```typescript
+function fetchProduct(productId: string): ResultAsync<Product, AppError> {
+  return ResultAsync.fromPromise(
+    fetch(`/api/products/${productId}`).then((r) => r.json()),
+    () => new AppError(MyErrorCodes.NETWORK_ERROR, "Network error")
+  ).mapErr((error) => {
+    // Log all errors
+    ErrorIngestor.capture(error, {
+      tags: { operation: "fetchProduct", productId },
+    });
+    return error;
+  });
+}
+```
+
+## Pattern: React Hook with Results
+
+Create hooks that return Results:
+
+```typescript
+import { useState, useEffect } from "react";
+import { Result, ok, err } from "neverthrow";
+
+function useAsyncResult<T, E>(
+  asyncFn: () => ResultAsync<T, E>,
+  deps: unknown[]
+): { result: Result<T, E> | null; loading: boolean } {
+  const [result, setResult] = useState<Result<T, E> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    asyncFn()
+      .then((r) => setResult(r))
+      .finally(() => setLoading(false));
+  }, deps);
+
+  return { result, loading };
+}
+
+// Usage
+function UserProfile({ userId }: { userId: string }) {
+  const { result, loading } = useAsyncResult(
+    () => fetchUser(userId),
+    [userId]
+  );
+
+  if (loading) return <Spinner />;
+
+  return result?.match(
+    (user) => <ProfileCard user={user} />,
+    (error) => {
+      ErrorIngestor.capture(error);
+      return <ErrorMessage message={error.message} />;
+    }
+  ) ?? null;
+}
+```
+
+## Pattern: Form Validation
+
+Validate forms with Results:
+
+```typescript
+import { Result, ok, err } from "neverthrow";
+import { AppError } from "@error-ingestor/client";
+
+interface FormData {
+  email: string;
+  password: string;
+}
+
+function validateEmail(email: string): Result<string, AppError> {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return err(new AppError(
+      MyErrorCodes.VALIDATION_ERROR,
+      "Invalid email format",
+      { field: "email" }
+    ));
+  }
+  return ok(email);
+}
+
+function validatePassword(password: string): Result<string, AppError> {
+  if (password.length < 8) {
+    return err(new AppError(
+      MyErrorCodes.VALIDATION_ERROR,
+      "Password must be at least 8 characters",
+      { field: "password" }
+    ));
+  }
+  return ok(password);
+}
+
+function validateForm(data: FormData): Result<FormData, AppError> {
+  return validateEmail(data.email)
+    .andThen(() => validatePassword(data.password))
+    .map(() => data);
+}
+
+// Usage
+const result = validateForm({ email, password });
+
+result.match(
+  (validData) => submitForm(validData),
+  (error) => {
+    // Don't capture validation errors, just show them
+    setFieldError(error.metadata?.field as string, error.message);
+  }
+);
+```
+
+## Complete Example
+
+```typescript
+// services/api.ts
+import { ResultAsync } from "neverthrow";
+import { AppError, ErrorIngestor } from "@error-ingestor/client";
+
+const API_BASE = "/api/v1";
+
+function request<T>(
+  endpoint: string,
+  options?: RequestInit
+): ResultAsync<T, AppError> {
+  return ResultAsync.fromPromise(
+    fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new AppError(
+          error.code || "API_ERROR",
+          error.message || "API request failed",
+          { status: response.status, endpoint }
+        );
+      }
+      return response.json();
+    }),
+    (error) => {
+      if (error instanceof AppError) return error;
+      return new AppError(
+        "NETWORK_ERROR",
+        "Network request failed",
+        { endpoint, error: String(error) }
+      );
+    }
+  ).mapErr((error) => {
+    // Capture all API errors
+    ErrorIngestor.capture(error, {
+      tags: { source: "api", endpoint },
+    });
+    return error;
+  });
+}
+
+// Typed API functions
+export const api = {
+  users: {
+    get: (id: string) => request<User>(`/users/${id}`),
+    list: () => request<User[]>("/users"),
+    create: (data: CreateUserDto) =>
+      request<User>("/users", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+  orders: {
+    get: (id: string) => request<Order>(`/orders/${id}`),
+    create: (data: CreateOrderDto) =>
+      request<Order>("/orders", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+};
+```

@@ -1,0 +1,344 @@
+---
+title: Dashboard
+description: Using the Error Ingestor dashboard to view and analyze errors.
+---
+
+# Dashboard
+
+The Error Ingestor dashboard provides a visual interface for viewing and analyzing errors captured from your applications.
+
+## Features
+
+- **Error List** - Browse and search captured errors
+- **Error Details** - View full error information including stack traces
+- **Trends** - Visualize error patterns over time
+- **Filtering** - Filter by app, error code, user, and time range
+- **Code Distribution** - See which errors occur most frequently
+
+## Running the Dashboard
+
+### Development
+
+```bash
+pnpm dev --filter dashboard
+```
+
+Dashboard runs at http://localhost:5173
+
+### Production Build
+
+```bash
+pnpm build --filter dashboard
+pnpm --filter dashboard preview
+```
+
+## Pages
+
+### Error List
+
+The main page showing all captured errors.
+
+**Features:**
+- Sortable columns
+- Pagination
+- Quick search
+- Time range selection
+
+**Columns:**
+| Column | Description |
+|--------|-------------|
+| Code | Error code (e.g., NETWORK_ERROR) |
+| Message | Error message text |
+| Platform | ios, android, or web |
+| User | User ID if available |
+| Time | When the error occurred |
+
+### Error Details
+
+Click any error to see full details:
+
+- **Error Info**: Code, message, app version
+- **Stack Trace**: Full stack trace with syntax highlighting
+- **Metadata**: Custom metadata as JSON
+- **Tags**: Key-value tags
+- **Platform**: Platform and version info
+- **User**: User ID and tracking info
+
+### Trends
+
+Visualize error patterns:
+
+- **Time-Series Chart**: Error count over time
+- **Granularity**: Switch between hourly and daily views
+- **Metrics**:
+  - Total errors
+  - Unique error codes
+  - Affected users
+
+### Code Distribution
+
+See which errors occur most frequently:
+
+- Pie or bar chart of error codes
+- Count per code
+- Percentage breakdown
+
+## Filtering
+
+### By Application
+
+Select an application from the dropdown to view only its errors.
+
+### By Error Code
+
+Filter to show only specific error codes:
+
+```
+Code: NETWORK_ERROR
+```
+
+### By User
+
+Filter errors for a specific user:
+
+```
+User ID: user-123
+```
+
+### By Time Range
+
+Select predefined ranges or custom dates:
+
+- Last hour
+- Last 24 hours
+- Last 7 days
+- Last 30 days
+- Custom range
+
+## Configuration
+
+### Environment Variables
+
+```env
+# .env
+VITE_API_URL=http://localhost:3000
+```
+
+### API Base URL
+
+Configure the server URL in `src/lib/api.ts`:
+
+```typescript
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+```
+
+## Tech Stack
+
+- **React 18** - UI framework
+- **React Router** - Navigation
+- **TanStack Query** - Data fetching
+- **Recharts** - Charts and visualization
+- **Tailwind CSS** - Styling
+- **Vite** - Build tool
+
+## Components
+
+### Layout
+
+Main application layout with navigation:
+
+```tsx
+<Layout>
+  <Header />
+  <Sidebar />
+  <Main>
+    <Outlet />
+  </Main>
+</Layout>
+```
+
+### ErrorList
+
+Table component for displaying errors:
+
+```tsx
+<ErrorList
+  errors={errors}
+  loading={loading}
+  onSelect={handleSelect}
+/>
+```
+
+### ErrorDetails
+
+Modal or page for single error view:
+
+```tsx
+<ErrorDetails
+  error={error}
+  onClose={handleClose}
+/>
+```
+
+### TrendChart
+
+Line chart for error trends:
+
+```tsx
+<TrendChart
+  data={trends}
+  granularity="hour"
+/>
+```
+
+### Filters
+
+Filter controls component:
+
+```tsx
+<Filters
+  appId={appId}
+  code={code}
+  userId={userId}
+  dateRange={dateRange}
+  onChange={handleFilterChange}
+/>
+```
+
+## Data Fetching
+
+### Hooks
+
+The dashboard uses custom hooks for data fetching:
+
+```tsx
+// Fetch errors with filters
+const { data, loading, error } = useErrors({
+  appId: "my-app",
+  startTime: "2024-01-01",
+  endTime: "2024-01-15",
+  limit: 100,
+});
+
+// Fetch trends
+const { data: trends } = useTrends({
+  appId: "my-app",
+  granularity: "day",
+});
+
+// Fetch error codes
+const { data: codes } = useErrorCodes("my-app");
+```
+
+### API Client
+
+```typescript
+// src/lib/api.ts
+export const api = {
+  errors: {
+    list: (params: ErrorsParams) =>
+      fetch(`${API_BASE}/dashboard/api/errors?${toQueryString(params)}`),
+
+    get: (id: string, appId: string) =>
+      fetch(`${API_BASE}/dashboard/api/errors/${id}?appId=${appId}`),
+  },
+
+  trends: (params: TrendsParams) =>
+    fetch(`${API_BASE}/dashboard/api/trends?${toQueryString(params)}`),
+
+  codes: (appId: string) =>
+    fetch(`${API_BASE}/dashboard/api/codes?appId=${appId}`),
+};
+```
+
+## Customization
+
+### Theme
+
+Modify `tailwind.config.js` for custom theming:
+
+```javascript
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        primary: {...},
+        error: {...},
+      },
+    },
+  },
+};
+```
+
+### Adding Charts
+
+Add new visualizations with Recharts:
+
+```tsx
+import { BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+
+function ErrorCodeChart({ data }) {
+  return (
+    <BarChart data={data}>
+      <XAxis dataKey="code" />
+      <YAxis />
+      <Tooltip />
+      <Bar dataKey="count" fill="#8884d8" />
+    </BarChart>
+  );
+}
+```
+
+## Deployment
+
+### Static Hosting
+
+Build and deploy to any static host:
+
+```bash
+pnpm build --filter dashboard
+# Deploy dist/ folder
+```
+
+Compatible with:
+- Vercel
+- Netlify
+- Cloudflare Pages
+- GitHub Pages
+- AWS S3 + CloudFront
+
+### Docker
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN npm install -g pnpm && pnpm install
+RUN pnpm build --filter dashboard
+
+FROM nginx:alpine
+COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
+EXPOSE 80
+```
+
+## Security Considerations
+
+The dashboard endpoints are currently unprotected. For production:
+
+1. **Add Authentication**: Implement login/session management
+2. **Protect Routes**: Add middleware to verify sessions
+3. **CORS**: Restrict to dashboard domain only
+4. **HTTPS**: Always use HTTPS in production
+
+### Adding Basic Auth
+
+```typescript
+// Dashboard auth middleware
+app.use("/dashboard/*", async (c, next) => {
+  const session = c.req.header("Authorization");
+  if (!validateSession(session)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  await next();
+});
+```

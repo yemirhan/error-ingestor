@@ -1,0 +1,151 @@
+---
+title: Quick Start
+description: Get error tracking working in your app in 5 minutes.
+---
+
+# Quick Start
+
+Get Error Ingestor working in your application in just a few steps.
+
+## 1. Initialize the Client
+
+Initialize Error Ingestor as early as possible in your application, typically in your root component or entry file.
+
+```typescript
+import { ErrorIngestor } from "@error-ingestor/client";
+
+// Initialize once at app startup
+const result = ErrorIngestor.init({
+  apiKey: "your-api-key",
+  appId: "my-app",
+  appVersion: "1.0.0",
+  endpoint: "https://errors.yourdomain.com",
+});
+
+if (result.isErr()) {
+  console.error("Failed to initialize ErrorIngestor:", result.error);
+}
+```
+
+## 2. Wrap Your App with ErrorBoundary
+
+Use the built-in ErrorBoundary component to catch React rendering errors:
+
+```tsx
+import { ErrorBoundary } from "@error-ingestor/client";
+
+function App() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <div>
+          <h1>Something went wrong</h1>
+          <p>{error.message}</p>
+          <button onClick={reset}>Try again</button>
+        </div>
+      )}
+    >
+      <YourApp />
+    </ErrorBoundary>
+  );
+}
+```
+
+## 3. Capture Errors Manually
+
+For errors in async operations or event handlers, capture them manually:
+
+```typescript
+import { ErrorIngestor } from "@error-ingestor/client";
+
+async function fetchData() {
+  try {
+    const response = await fetch("/api/data");
+    if (!response.ok) {
+      throw new Error("Failed to fetch data");
+    }
+    return response.json();
+  } catch (error) {
+    // Capture the error
+    ErrorIngestor.capture(error as Error, {
+      tags: { operation: "fetchData" },
+      metadata: { url: "/api/data" },
+    });
+    throw error;
+  }
+}
+```
+
+## 4. Set User ID (Optional)
+
+Track which users are experiencing errors:
+
+```typescript
+// After user logs in
+ErrorIngestor.setUserId("user-123");
+
+// After user logs out
+ErrorIngestor.setUserId(null);
+```
+
+## Complete Example
+
+Here's a complete React example:
+
+```tsx
+import { useEffect } from "react";
+import { ErrorIngestor, ErrorBoundary } from "@error-ingestor/client";
+
+// Initialize ErrorIngestor
+function initializeErrorTracking() {
+  ErrorIngestor.init({
+    apiKey: process.env.REACT_APP_ERROR_INGESTOR_API_KEY!,
+    appId: "my-react-app",
+    appVersion: "1.0.0",
+    endpoint: process.env.REACT_APP_ERROR_INGESTOR_ENDPOINT!,
+    debug: process.env.NODE_ENV === "development",
+  });
+}
+
+function ErrorFallback({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <div style={{ padding: 20, textAlign: "center" }}>
+      <h2>Oops! Something went wrong</h2>
+      <p>{error.message}</p>
+      <button onClick={reset}>Try Again</button>
+    </div>
+  );
+}
+
+export default function App() {
+  useEffect(() => {
+    initializeErrorTracking();
+  }, []);
+
+  return (
+    <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+      <div>
+        <h1>My App</h1>
+        {/* Your app content */}
+      </div>
+    </ErrorBoundary>
+  );
+}
+```
+
+## What Gets Captured
+
+Each captured error includes:
+
+- **Error Details**: Code, message, and stack trace
+- **App Info**: App ID and version
+- **Platform**: ios, android, or web
+- **Timestamp**: When the error occurred
+- **User ID**: If set
+- **Custom Data**: Tags and metadata you provide
+
+## Next Steps
+
+- [Configuration](/docs/getting-started/configuration) - Learn about all configuration options
+- [API Reference](/docs/client/api-reference) - Complete API documentation
+- [Custom Errors](/docs/client/custom-errors) - Create typed error codes

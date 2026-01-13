@@ -1,0 +1,61 @@
+---
+title: Installation
+description: How to install Error Ingestor in your project.
+---
+
+# Installation
+
+Install the Error Ingestor client SDK in your React or React Native project.
+
+## Prerequisites
+
+- Node.js 18 or higher
+- React 18 or higher
+- (Optional) React Native 0.72 or higher for mobile apps
+
+## Package Installation
+
+### Using npm
+
+```bash
+npm install @error-ingestor/client
+```
+
+### Using pnpm
+
+```bash
+pnpm add @error-ingestor/client
+```
+
+### Using yarn
+
+```bash
+yarn add @error-ingestor/client
+```
+
+## Peer Dependencies
+
+The client SDK has the following peer dependencies:
+
+| Package | Version | Required |
+|---------|---------|----------|
+| `react` | >= 18.0.0 | Yes |
+| `react-native` | >= 0.72.0 | No (only for React Native apps) |
+
+## What's Included
+
+The `@error-ingestor/client` package includes:
+
+- **ErrorIngestor** - Main singleton class for capturing errors
+- **ErrorBoundary** - React component for catching render errors
+- **AppError** - Custom error class with error codes
+- **ErrorCodes** - Pre-defined error codes for common scenarios
+- **Utilities** - Helper functions like `isAppError` and `getErrorInfo`
+
+## TypeScript Support
+
+The package is written in TypeScript and includes type definitions. No additional `@types` packages are required.
+
+## Next Steps
+
+Once installed, proceed to the [Quick Start](/docs/getting-started/quick-start) guide to set up error tracking in your application.

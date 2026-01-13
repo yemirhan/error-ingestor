@@ -1,0 +1,512 @@
+---
+title: Next.js Integration
+description: Integrating Error Ingestor with Next.js applications (App Router).
+---
+
+# Next.js Integration
+
+Set up error tracking in your Next.js application using the App Router.
+
+## Installation
+
+```bash
+npm install @error-ingestor/client
+```
+
+## App Router Setup
+
+### 1. Create Client Provider
+
+Since Error Ingestor runs on the client, create a provider component:
+
+```tsx
+// src/components/Providers.tsx
+"use client";
+
+import { useEffect } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+function initErrorTracking() {
+  if (typeof window === "undefined") return;
+
+  ErrorIngestor.init({
+    apiKey: process.env.NEXT_PUBLIC_ERROR_INGESTOR_API_KEY!,
+    appId: process.env.NEXT_PUBLIC_ERROR_INGESTOR_APP_ID!,
+    appVersion: process.env.NEXT_PUBLIC_APP_VERSION || "1.0.0",
+    endpoint: process.env.NEXT_PUBLIC_ERROR_INGESTOR_ENDPOINT!,
+    debug: process.env.NODE_ENV === "development",
+  });
+}
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    initErrorTracking();
+  }, []);
+
+  return <>{children}</>;
+}
+```
+
+### 2. Update Root Layout
+
+```tsx
+// src/app/layout.tsx
+import { Providers } from "@/components/Providers";
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+```
+
+### 3. Create Error Boundary Page
+
+Next.js App Router has built-in error handling with `error.tsx`:
+
+```tsx
+// src/app/error.tsx
+"use client";
+
+import { useEffect } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Report error to Error Ingestor
+    ErrorIngestor.capture(error, {
+      tags: {
+        source: "next-error-boundary",
+        digest: error.digest || "unknown",
+      },
+    });
+  }, [error]);
+
+  return (
+    <div className="error-container">
+      <h2>Something went wrong!</h2>
+      <p>{error.message}</p>
+      <button onClick={reset}>Try again</button>
+    </div>
+  );
+}
+```
+
+### 4. Create Global Error Handler
+
+For root layout errors, create `global-error.tsx`:
+
+```tsx
+// src/app/global-error.tsx
+"use client";
+
+import { useEffect } from "react";
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Log to console (ErrorIngestor might not be initialized)
+    console.error("Global error:", error);
+  }, [error]);
+
+  return (
+    <html>
+      <body>
+        <div style={{ padding: "2rem", textAlign: "center" }}>
+          <h2>Something went wrong!</h2>
+          <p>A critical error occurred.</p>
+          <button onClick={reset}>Try again</button>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+## Environment Variables
+
+```env
+# .env.local
+NEXT_PUBLIC_ERROR_INGESTOR_API_KEY=your-api-key
+NEXT_PUBLIC_ERROR_INGESTOR_ENDPOINT=https://errors.yourdomain.com
+NEXT_PUBLIC_ERROR_INGESTOR_APP_ID=my-nextjs-app
+NEXT_PUBLIC_APP_VERSION=1.0.0
+```
+
+## Capturing Errors
+
+### In Client Components
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function SubmitForm() {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (formData: FormData) => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/submit", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Submission failed");
+      }
+    } catch (error) {
+      ErrorIngestor.capture(error as Error, {
+        tags: { form: "contact", action: "submit" },
+      });
+      // Show error to user
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form action={handleSubmit}>
+      {/* Form fields */}
+    </form>
+  );
+}
+```
+
+### In Server Actions
+
+For server-side errors, log them separately or use a server-side tracking solution:
+
+```tsx
+// src/app/actions.ts
+"use server";
+
+export async function submitAction(formData: FormData) {
+  try {
+    // Server logic
+    await processData(formData);
+    return { success: true };
+  } catch (error) {
+    // Log server error (use server-side logging)
+    console.error("Server action error:", error);
+
+    // Return error to client for tracking
+    return {
+      success: false,
+      error: {
+        message: (error as Error).message,
+        code: "SERVER_ERROR",
+      },
+    };
+  }
+}
+```
+
+```tsx
+// Client component
+"use client";
+
+import { submitAction } from "./actions";
+import { ErrorIngestor, AppError } from "@error-ingestor/client";
+
+export function Form() {
+  const handleSubmit = async (formData: FormData) => {
+    const result = await submitAction(formData);
+
+    if (!result.success) {
+      // Capture server error on client
+      ErrorIngestor.capture(
+        new AppError(result.error.code, result.error.message),
+        { tags: { source: "server-action" } }
+      );
+    }
+  };
+
+  return <form action={handleSubmit}>{/* ... */}</form>;
+}
+```
+
+## Route-Level Error Boundaries
+
+Create error boundaries for specific routes:
+
+```
+src/app/
+├── layout.tsx
+├── error.tsx              # Catches errors from all pages
+├── global-error.tsx       # Catches root layout errors
+├── dashboard/
+│   ├── layout.tsx
+│   ├── error.tsx          # Dashboard-specific error UI
+│   └── page.tsx
+└── settings/
+    ├── error.tsx          # Settings-specific error UI
+    └── page.tsx
+```
+
+### Dashboard Error Page
+
+```tsx
+// src/app/dashboard/error.tsx
+"use client";
+
+import { useEffect } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+import { useRouter } from "next/navigation";
+
+export default function DashboardError({
+  error,
+  reset,
+}: {
+  error: Error;
+  reset: () => void;
+}) {
+  const router = useRouter();
+
+  useEffect(() => {
+    ErrorIngestor.capture(error, {
+      tags: { page: "dashboard" },
+    });
+  }, [error]);
+
+  return (
+    <div className="dashboard-error">
+      <h2>Dashboard Error</h2>
+      <p>{error.message}</p>
+      <div className="actions">
+        <button onClick={reset}>Retry</button>
+        <button onClick={() => router.push("/")}>Go Home</button>
+      </div>
+    </div>
+  );
+}
+```
+
+## User Tracking
+
+### With NextAuth.js
+
+```tsx
+// src/components/Providers.tsx
+"use client";
+
+import { useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function ErrorTrackingProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { data: session, status } = useSession();
+
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.id) {
+      ErrorIngestor.setUserId(session.user.id);
+    } else if (status === "unauthenticated") {
+      ErrorIngestor.setUserId(null);
+    }
+  }, [session, status]);
+
+  return <>{children}</>;
+}
+```
+
+### With Clerk
+
+```tsx
+// src/components/Providers.tsx
+"use client";
+
+import { useEffect } from "react";
+import { useUser } from "@clerk/nextjs";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function ErrorTrackingProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { user, isLoaded } = useUser();
+
+  useEffect(() => {
+    if (isLoaded) {
+      ErrorIngestor.setUserId(user?.id || null);
+    }
+  }, [user, isLoaded]);
+
+  return <>{children}</>;
+}
+```
+
+## API Route Error Handling
+
+```tsx
+// src/app/api/data/route.ts
+import { NextRequest, NextResponse } from "next/server";
+
+export async function GET(request: NextRequest) {
+  try {
+    const data = await fetchData();
+    return NextResponse.json({ data });
+  } catch (error) {
+    // Log server-side
+    console.error("API Error:", error);
+
+    return NextResponse.json(
+      {
+        error: {
+          code: "FETCH_ERROR",
+          message: "Failed to fetch data",
+        },
+      },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## Client-Side API Hook
+
+```tsx
+// src/hooks/useApi.ts
+"use client";
+
+import { useState, useCallback } from "react";
+import { ErrorIngestor, AppError } from "@error-ingestor/client";
+
+interface ApiState<T> {
+  data: T | null;
+  loading: boolean;
+  error: Error | null;
+}
+
+export function useApi<T>(
+  fetcher: () => Promise<T>,
+  options?: { tags?: Record<string, string> }
+) {
+  const [state, setState] = useState<ApiState<T>>({
+    data: null,
+    loading: false,
+    error: null,
+  });
+
+  const execute = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, error: null }));
+
+    try {
+      const data = await fetcher();
+      setState({ data, loading: false, error: null });
+      return data;
+    } catch (error) {
+      const err = error as Error;
+
+      // Capture error
+      ErrorIngestor.capture(err, {
+        tags: { source: "api-hook", ...options?.tags },
+      });
+
+      setState((s) => ({ ...s, loading: false, error: err }));
+      throw error;
+    }
+  }, [fetcher, options?.tags]);
+
+  return { ...state, execute };
+}
+
+// Usage
+function DataComponent() {
+  const { data, loading, error, execute } = useApi(
+    () => fetch("/api/data").then((r) => r.json()),
+    { tags: { component: "DataComponent" } }
+  );
+
+  useEffect(() => {
+    execute();
+  }, [execute]);
+
+  if (loading) return <Loading />;
+  if (error) return <Error message={error.message} />;
+  return <DataView data={data} />;
+}
+```
+
+## Production Considerations
+
+### Disable Debug in Production
+
+```tsx
+ErrorIngestor.init({
+  // ...
+  debug: process.env.NODE_ENV === "development",
+});
+```
+
+### Environment-Specific Config
+
+```tsx
+// src/lib/error-ingestor.ts
+import { ErrorIngestor } from "@error-ingestor/client";
+
+export function initErrorTracking() {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  ErrorIngestor.init({
+    apiKey: process.env.NEXT_PUBLIC_ERROR_INGESTOR_API_KEY!,
+    appId: process.env.NEXT_PUBLIC_ERROR_INGESTOR_APP_ID!,
+    appVersion: process.env.NEXT_PUBLIC_APP_VERSION || "1.0.0",
+    endpoint: process.env.NEXT_PUBLIC_ERROR_INGESTOR_ENDPOINT!,
+    debug: !isProduction,
+    // More aggressive batching in production
+    batchSize: isProduction ? 20 : 5,
+    flushInterval: isProduction ? 10000 : 3000,
+  });
+}
+```
+
+## Complete Project Structure
+
+```
+src/
+├── app/
+│   ├── layout.tsx           # Root layout with Providers
+│   ├── page.tsx
+│   ├── error.tsx            # Global error boundary
+│   ├── global-error.tsx     # Root error boundary
+│   ├── api/
+│   │   └── data/route.ts
+│   └── dashboard/
+│       ├── layout.tsx
+│       ├── page.tsx
+│       └── error.tsx        # Dashboard error boundary
+├── components/
+│   ├── Providers.tsx        # Client providers
+│   └── ErrorFallback.tsx
+├── hooks/
+│   └── useApi.ts
+└── lib/
+    ├── error-ingestor.ts    # Init function
+    └── errors.ts            # Custom error codes
+```

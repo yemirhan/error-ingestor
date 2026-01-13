@@ -1,0 +1,513 @@
+---
+title: React Native Integration
+description: Integrating Error Ingestor with React Native and Expo applications.
+---
+
+# React Native Integration
+
+Set up error tracking in your React Native application using Expo or bare React Native.
+
+## Installation
+
+```bash
+npm install @error-ingestor/client
+```
+
+## Expo Setup
+
+### 1. Initialize in Root Layout
+
+```tsx
+// app/_layout.tsx (Expo Router)
+import { useEffect } from "react";
+import { Stack } from "expo-router";
+import { ErrorBoundary, ErrorIngestor } from "@error-ingestor/client";
+import Constants from "expo-constants";
+import { ErrorFallback } from "../components/ErrorFallback";
+
+function initErrorTracking() {
+  ErrorIngestor.init({
+    apiKey: Constants.expoConfig?.extra?.errorIngestorApiKey || "your-api-key",
+    appId: Constants.expoConfig?.extra?.appId || "my-rn-app",
+    appVersion: Constants.expoConfig?.version || "1.0.0",
+    endpoint: Constants.expoConfig?.extra?.errorIngestorEndpoint || "http://localhost:3000",
+    debug: __DEV__,
+  });
+}
+
+export default function RootLayout() {
+  useEffect(() => {
+    initErrorTracking();
+  }, []);
+
+  return (
+    <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} onReset={reset} />}>
+      <Stack>
+        <Stack.Screen name="index" options={{ title: "Home" }} />
+        <Stack.Screen name="details" options={{ title: "Details" }} />
+      </Stack>
+    </ErrorBoundary>
+  );
+}
+```
+
+### 2. Configure app.config.js
+
+```javascript
+// app.config.js
+export default {
+  expo: {
+    name: "My App",
+    slug: "my-app",
+    version: "1.0.0",
+    extra: {
+      appId: "my-rn-app",
+      errorIngestorApiKey: process.env.ERROR_INGESTOR_API_KEY,
+      errorIngestorEndpoint: process.env.ERROR_INGESTOR_ENDPOINT,
+    },
+  },
+};
+```
+
+### 3. Create Error Fallback
+
+```tsx
+// components/ErrorFallback.tsx
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+
+interface ErrorFallbackProps {
+  error: Error;
+  onReset: () => void;
+}
+
+export function ErrorFallback({ error, onReset }: ErrorFallbackProps) {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Oops!</Text>
+      <Text style={styles.message}>{error.message}</Text>
+      <TouchableOpacity style={styles.button} onPress={onReset}>
+        <Text style={styles.buttonText}>Try Again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#f5f5f5",
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  message: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  button: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+});
+```
+
+## Bare React Native Setup
+
+### 1. Initialize in App Entry
+
+```tsx
+// App.tsx
+import React, { useEffect } from "react";
+import { ErrorBoundary, ErrorIngestor } from "@error-ingestor/client";
+import { NavigationContainer } from "@react-navigation/native";
+import Config from "react-native-config";
+import { AppNavigator } from "./navigation/AppNavigator";
+import { ErrorFallback } from "./components/ErrorFallback";
+
+function initErrorTracking() {
+  ErrorIngestor.init({
+    apiKey: Config.ERROR_INGESTOR_API_KEY,
+    appId: Config.APP_ID,
+    appVersion: Config.APP_VERSION,
+    endpoint: Config.ERROR_INGESTOR_ENDPOINT,
+    debug: __DEV__,
+  });
+}
+
+export default function App() {
+  useEffect(() => {
+    initErrorTracking();
+  }, []);
+
+  return (
+    <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} onReset={reset} />}>
+      <NavigationContainer>
+        <AppNavigator />
+      </NavigationContainer>
+    </ErrorBoundary>
+  );
+}
+```
+
+### 2. Environment Configuration
+
+```env
+# .env
+ERROR_INGESTOR_API_KEY=your-api-key
+ERROR_INGESTOR_ENDPOINT=https://errors.yourdomain.com
+APP_ID=my-rn-app
+APP_VERSION=1.0.0
+```
+
+## Global Error Handlers
+
+The SDK automatically sets up global error handlers for React Native:
+
+```typescript
+// This happens automatically when you call init()
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  ErrorIngestor.capture(error, {
+    tags: {
+      fatal: String(isFatal),
+      source: "global-handler",
+    },
+  });
+});
+```
+
+For fatal errors, consider showing a restart prompt:
+
+```tsx
+// components/FatalErrorScreen.tsx
+import { View, Text, TouchableOpacity } from "react-native";
+import RNRestart from "react-native-restart";
+
+export function FatalErrorScreen({ error }: { error: Error }) {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>App Crashed</Text>
+      <Text style={styles.message}>
+        We've reported this issue and are working on a fix.
+      </Text>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => RNRestart.Restart()}
+      >
+        <Text style={styles.buttonText}>Restart App</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+```
+
+## Capturing Errors
+
+### In Components
+
+```tsx
+import { ErrorIngestor } from "@error-ingestor/client";
+
+function ProfileScreen() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  useEffect(() => {
+    async function loadProfile() {
+      try {
+        const data = await fetchProfile();
+        setProfile(data);
+      } catch (err) {
+        const error = err as Error;
+        ErrorIngestor.capture(error, {
+          tags: { screen: "Profile", operation: "loadProfile" },
+        });
+        setError(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadProfile();
+  }, []);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorView error={error} />;
+  return <ProfileView profile={profile!} />;
+}
+```
+
+### In Event Handlers
+
+```tsx
+function SubmitButton() {
+  const handleSubmit = async () => {
+    try {
+      await submitForm();
+      Alert.alert("Success", "Form submitted!");
+    } catch (error) {
+      ErrorIngestor.capture(error as Error, {
+        tags: { action: "submit-form" },
+      });
+      Alert.alert("Error", "Failed to submit form. Please try again.");
+    }
+  };
+
+  return (
+    <TouchableOpacity onPress={handleSubmit}>
+      <Text>Submit</Text>
+    </TouchableOpacity>
+  );
+}
+```
+
+## Network Error Handling
+
+```tsx
+// services/api.ts
+import { ResultAsync } from "neverthrow";
+import { AppError, ErrorIngestor } from "@error-ingestor/client";
+
+const API_BASE = "https://api.example.com";
+
+export async function apiRequest<T>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<T> {
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    });
+
+    if (!response.ok) {
+      throw new AppError(
+        "API_ERROR",
+        `API error: ${response.status}`,
+        { endpoint, status: response.status }
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    // Capture network errors
+    if (error instanceof TypeError && error.message === "Network request failed") {
+      ErrorIngestor.capture(
+        new AppError("NETWORK_ERROR", "No internet connection"),
+        { tags: { endpoint } }
+      );
+    } else {
+      ErrorIngestor.capture(error as Error, { tags: { endpoint } });
+    }
+    throw error;
+  }
+}
+```
+
+## User Tracking
+
+```tsx
+// contexts/AuthContext.tsx
+import { createContext, useContext, useEffect, useState } from "react";
+import { ErrorIngestor } from "@error-ingestor/client";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  // Restore session
+  useEffect(() => {
+    async function restoreSession() {
+      const userData = await AsyncStorage.getItem("user");
+      if (userData) {
+        const user = JSON.parse(userData);
+        setUser(user);
+        ErrorIngestor.setUserId(user.id);
+      }
+    }
+    restoreSession();
+  }, []);
+
+  const login = async (credentials: Credentials) => {
+    const user = await authService.login(credentials);
+    await AsyncStorage.setItem("user", JSON.stringify(user));
+    setUser(user);
+    ErrorIngestor.setUserId(user.id);
+  };
+
+  const logout = async () => {
+    await AsyncStorage.removeItem("user");
+    setUser(null);
+    ErrorIngestor.setUserId(null);
+    await ErrorIngestor.flush(); // Send any pending errors
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+```
+
+## Navigation Integration
+
+### React Navigation
+
+```tsx
+// navigation/AppNavigator.tsx
+import { NavigationContainer } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { ErrorBoundary } from "@error-ingestor/client";
+
+const Stack = createNativeStackNavigator();
+
+function ScreenWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <ScreenErrorFallback error={error} onReset={reset} />
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+export function AppNavigator() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen name="Home">
+        {() => (
+          <ScreenWrapper>
+            <HomeScreen />
+          </ScreenWrapper>
+        )}
+      </Stack.Screen>
+      <Stack.Screen name="Details">
+        {() => (
+          <ScreenWrapper>
+            <DetailsScreen />
+          </ScreenWrapper>
+        )}
+      </Stack.Screen>
+    </Stack.Navigator>
+  );
+}
+```
+
+## Debugging
+
+Enable debug mode during development:
+
+```tsx
+ErrorIngestor.init({
+  // ...other config
+  debug: __DEV__, // Only in development
+});
+```
+
+Debug mode logs:
+- Initialization status
+- Each captured error
+- Queue size changes
+- Flush operations
+- Network requests
+
+## App Lifecycle
+
+Handle app closing to flush pending errors:
+
+```tsx
+// App.tsx
+import { useEffect } from "react";
+import { AppState } from "react-native";
+import { ErrorIngestor } from "@error-ingestor/client";
+
+function App() {
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        // Flush errors when app goes to background
+        ErrorIngestor.flush();
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  return <MainApp />;
+}
+```
+
+## Testing Errors
+
+Create a debug screen to test error capture:
+
+```tsx
+// screens/DebugScreen.tsx
+import { View, Button, Alert } from "react-native";
+import { ErrorIngestor, AppError } from "@error-ingestor/client";
+
+export function DebugScreen() {
+  return (
+    <View style={{ padding: 20, gap: 10 }}>
+      <Button
+        title="Capture Manual Error"
+        onPress={() => {
+          ErrorIngestor.capture(new Error("Test manual error"));
+          Alert.alert("Captured!");
+        }}
+      />
+
+      <Button
+        title="Capture AppError"
+        onPress={() => {
+          ErrorIngestor.capture(
+            new AppError("TEST_ERROR", "Test AppError", { test: true })
+          );
+          Alert.alert("Captured!");
+        }}
+      />
+
+      <Button
+        title="Throw Error (Test Boundary)"
+        onPress={() => {
+          throw new Error("Test boundary error");
+        }}
+      />
+
+      <Button
+        title="Check Queue Size"
+        onPress={() => {
+          Alert.alert("Queue Size", `${ErrorIngestor.getQueueSize()} errors`);
+        }}
+      />
+
+      <Button
+        title="Flush Queue"
+        onPress={async () => {
+          await ErrorIngestor.flush();
+          Alert.alert("Flushed!");
+        }}
+      />
+    </View>
+  );
+}
+```

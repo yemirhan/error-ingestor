@@ -1,0 +1,79 @@
+---
+title: Introduction
+description: Error Ingestor - A lightweight, self-hosted error tracking solution for React and React Native applications.
+---
+
+# Error Ingestor
+
+A lightweight, self-hosted error tracking solution for React and React Native applications. Track, analyze, and fix errors in your applications with ease.
+
+## Features
+
+- **Client SDK** - Simple API for capturing errors in React and React Native apps
+- **Error Boundaries** - Built-in React ErrorBoundary component with automatic error reporting
+- **Batching & Retry** - Efficient error batching with automatic retry on failure
+- **Custom Error Codes** - Define application-specific error codes for better categorization
+- **Real-time Dashboard** - View and analyze errors in a beautiful dashboard
+- **ClickHouse Storage** - High-performance analytics database for fast queries
+- **Self-hosted** - Full control over your data
+
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   React App     │     │   Hono Server   │     │   ClickHouse    │
+│   (Client SDK)  │────▶│   (API)         │────▶│   (Storage)     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                        │
+                                                        ▼
+                                              ┌─────────────────┐
+                                              │   Dashboard     │
+                                              │   (React App)   │
+                                              └─────────────────┘
+```
+
+## Quick Start
+
+### 1. Install the Client SDK
+
+```bash
+npm install @error-ingestor/client
+```
+
+### 2. Initialize in Your App
+
+```typescript
+import { ErrorIngestor } from "@error-ingestor/client";
+
+ErrorIngestor.init({
+  apiKey: "your-api-key",
+  appId: "my-app",
+  appVersion: "1.0.0",
+  endpoint: "https://errors.yourdomain.com",
+});
+```
+
+### 3. Capture Errors
+
+```typescript
+try {
+  await riskyOperation();
+} catch (error) {
+  ErrorIngestor.capture(error);
+}
+```
+
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| `@error-ingestor/client` | Client SDK for React and React Native |
+| `@error-ingestor/shared` | Shared types and utilities |
+| `@error-ingestor/server` | Hono-based API server |
+| `@error-ingestor/dashboard` | React dashboard for viewing errors |
+
+## Next Steps
+
+- [Installation Guide](/docs/getting-started/installation) - Get started with the SDK
+- [Quick Start](/docs/getting-started/quick-start) - Your first error capture in 5 minutes
+- [API Reference](/docs/client/api-reference) - Complete API documentation

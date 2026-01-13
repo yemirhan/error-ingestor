@@ -1,0 +1,294 @@
+---
+title: Authentication
+description: API key authentication for the Error Ingestor server.
+---
+
+# Authentication
+
+The Error Ingestor server uses API key authentication to secure the ingestion endpoints.
+
+## How It Works
+
+1. Each application is registered with a unique API key
+2. Clients include the API key in requests
+3. Server validates the key and extracts the app ID
+4. Events are tagged with the authenticated app ID
+
+## API Key Format
+
+API keys follow this format:
+
+```
+ei_<base64url-encoded-random-bytes>
+```
+
+Example:
+```
+ei_dGVzdF9rZXlfMTIzNDU
+```
+
+## Using API Keys
+
+### Header Authentication
+
+Include the API key in the `X-API-Key` header:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/ingest \
+  -H "X-API-Key: ei_your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"events": [...]}'
+```
+
+### In Client SDK
+
+```typescript
+ErrorIngestor.init({
+  apiKey: "ei_your_api_key_here",
+  // ... other config
+});
+```
+
+## Test API Key
+
+For development, a test API key is included:
+
+```
+API Key: ei_test_key_12345
+App ID:  test-app
+```
+
+**Warning:** Do not use the test key in production.
+
+## Registering Applications
+
+### Programmatic Registration
+
+Use the `registerApp` function:
+
+```typescript
+import { registerApp } from "./auth";
+
+// Returns the generated API key
+const apiKey = registerApp("my-app-id", "My Application Name");
+console.log("API Key:", apiKey);
+// Output: API Key: ei_aBcDeFgHiJkLmNoPqRsTuVwXyZ...
+```
+
+### Manual Registration (Database)
+
+For production with persistent storage:
+
+```sql
+-- Create apps table
+CREATE TABLE apps (
+    id String,
+    name String,
+    api_key_hash String,
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY id;
+
+-- Insert app (hash the API key first)
+INSERT INTO apps (id, name, api_key_hash)
+VALUES ('my-app', 'My Application', '<sha256-hash>');
+```
+
+## API Key Security
+
+### Key Hashing
+
+API keys are hashed with SHA-256 before storage:
+
+```typescript
+import { createHash } from "crypto";
+
+function hashApiKey(apiKey: string): string {
+  return createHash("sha256").update(apiKey).digest("hex");
+}
+```
+
+### Storage Recommendations
+
+| Environment | Storage |
+|-------------|---------|
+| Development | In-memory (default) |
+| Production | Database (ClickHouse, PostgreSQL) |
+
+### Best Practices
+
+1. **Never log API keys** - Use hashed versions for logging
+2. **Use environment variables** - Don't commit keys to source control
+3. **Rotate keys periodically** - Implement key rotation
+4. **Use different keys per environment** - Separate dev/staging/production
+
+## Key Rotation
+
+To rotate an API key:
+
+1. Generate a new key for the app
+2. Update clients with the new key
+3. Keep the old key valid temporarily
+4. Remove the old key after migration
+
+```typescript
+// Generate new key
+const newKey = generateApiKey();
+
+// Add new key to app (app now has 2 valid keys)
+addKeyToApp(appId, newKey);
+
+// After clients migrate, remove old key
+removeKeyFromApp(appId, oldKeyHash);
+```
+
+## Error Responses
+
+### Missing API Key
+
+```json
+{
+  "success": false,
+  "error": "API key is required"
+}
+```
+Status: 401 Unauthorized
+
+### Invalid API Key
+
+```json
+{
+  "success": false,
+  "error": "Invalid API key"
+}
+```
+Status: 401 Unauthorized
+
+### App ID Mismatch
+
+When event's appId doesn't match the authenticated app:
+
+```json
+{
+  "success": false,
+  "error": "App ID mismatch: event appId does not match authenticated app"
+}
+```
+Status: 403 Forbidden
+
+## Implementing Custom Auth
+
+### Database-Backed Auth
+
+```typescript
+// auth/database.ts
+import { clickhouse } from "./clickhouse";
+
+interface App {
+  id: string;
+  name: string;
+}
+
+export async function getAppByApiKey(apiKey: string): Promise<App | null> {
+  const hash = hashApiKey(apiKey);
+
+  const result = await clickhouse.query({
+    query: `
+      SELECT id, name
+      FROM apps
+      WHERE api_key_hash = {hash:String}
+      LIMIT 1
+    `,
+    query_params: { hash },
+  });
+
+  const apps = await result.json<App>();
+  return apps[0] || null;
+}
+```
+
+### With Caching
+
+```typescript
+import { LRUCache } from "lru-cache";
+
+const appCache = new LRUCache<string, App>({
+  max: 1000,
+  ttl: 1000 * 60 * 5, // 5 minutes
+});
+
+export async function getAppByApiKey(apiKey: string): Promise<App | null> {
+  const hash = hashApiKey(apiKey);
+
+  // Check cache
+  const cached = appCache.get(hash);
+  if (cached) return cached;
+
+  // Query database
+  const app = await queryAppFromDatabase(hash);
+
+  // Cache result
+  if (app) {
+    appCache.set(hash, app);
+  }
+
+  return app;
+}
+```
+
+## Multi-Tenant Setup
+
+For multiple organizations:
+
+```typescript
+interface App {
+  id: string;
+  name: string;
+  organizationId: string;
+}
+
+// Apps table with organization
+CREATE TABLE apps (
+    id String,
+    name String,
+    organization_id String,
+    api_key_hash String,
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY (organization_id, id);
+```
+
+## Testing Authentication
+
+### Verify Key Works
+
+```bash
+curl http://localhost:3000/api/v1/ingest/test \
+  -H "X-API-Key: ei_your_api_key"
+```
+
+Expected response:
+
+```json
+{
+  "success": true,
+  "appId": "your-app-id",
+  "appName": "Your App Name"
+}
+```
+
+### Test Invalid Key
+
+```bash
+curl http://localhost:3000/api/v1/ingest/test \
+  -H "X-API-Key: invalid_key"
+```
+
+Expected response (401):
+
+```json
+{
+  "success": false,
+  "error": "Invalid API key"
+}
+```

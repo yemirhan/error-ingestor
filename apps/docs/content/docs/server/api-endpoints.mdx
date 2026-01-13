@@ -1,0 +1,423 @@
+---
+title: API Endpoints
+description: Complete reference for Error Ingestor server API endpoints.
+---
+
+# API Endpoints
+
+Complete reference for all Error Ingestor server API endpoints.
+
+## Base URL
+
+```
+http://localhost:3000
+```
+
+## Authentication
+
+Protected endpoints require the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: your-api-key" http://localhost:3000/api/v1/ingest/test
+```
+
+## Health Endpoints
+
+### GET /health
+
+Full health check including database connectivity.
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "services": {
+    "clickhouse": "up"
+  }
+}
+```
+
+| Status Code | Condition |
+|-------------|-----------|
+| 200 | All services healthy |
+| 503 | One or more services degraded |
+
+---
+
+### GET /health/live
+
+Kubernetes liveness probe. Always returns 200 if server is running.
+
+**Response:**
+
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### GET /health/ready
+
+Kubernetes readiness probe. Returns 503 if ClickHouse is unavailable.
+
+**Response:**
+
+```json
+{
+  "status": "ready"
+}
+```
+
+---
+
+## Ingestion Endpoints
+
+### POST /api/v1/ingest
+
+Ingest a batch of error events. **Requires authentication.**
+
+**Headers:**
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `X-API-Key` | Yes | Your API key |
+| `Content-Type` | Yes | `application/json` |
+
+**Request Body:**
+
+```json
+{
+  "events": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "code": "NETWORK_ERROR",
+      "message": "Failed to connect to server",
+      "stackTrace": "Error: Failed to connect...\n    at fetch (/app/api.js:15:5)",
+      "appId": "my-app",
+      "appVersion": "1.2.3",
+      "platform": "web",
+      "platformVersion": "Chrome 120.0",
+      "userId": "user-123",
+      "timestamp": "2024-01-15T10:30:00.000Z",
+      "metadata": {
+        "endpoint": "/api/data",
+        "retryCount": 3
+      },
+      "tags": {
+        "environment": "production",
+        "feature": "checkout"
+      }
+    }
+  ]
+}
+```
+
+**Event Schema:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Unique event ID |
+| `code` | string | Yes | Error code |
+| `message` | string | Yes | Error message |
+| `stackTrace` | string | No | Stack trace |
+| `appId` | string | Yes | Application ID |
+| `appVersion` | string | Yes | Application version |
+| `platform` | enum | Yes | `ios`, `android`, or `web` |
+| `platformVersion` | string | Yes | Platform version |
+| `userId` | string | No | User identifier |
+| `timestamp` | ISO 8601 | Yes | Event timestamp |
+| `metadata` | object | No | Additional data |
+| `tags` | object | No | String key-value pairs |
+
+**Constraints:**
+
+- Minimum 1 event, maximum 100 events per request
+- All events must match the authenticated `appId`
+
+**Response (Success):**
+
+```json
+{
+  "success": true,
+  "accepted": 5
+}
+```
+
+**Response (Error):**
+
+```json
+{
+  "success": false,
+  "error": "Validation error: events[0].id must be a valid UUID"
+}
+```
+
+| Status Code | Condition |
+|-------------|-----------|
+| 200 | Events accepted |
+| 400 | Validation error |
+| 401 | Missing or invalid API key |
+| 403 | App ID mismatch |
+| 500 | Server error |
+
+---
+
+### GET /api/v1/ingest/test
+
+Test API key validity. **Requires authentication.**
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "appId": "my-app",
+  "appName": "My Application"
+}
+```
+
+---
+
+## Dashboard Endpoints
+
+These endpoints are used by the dashboard UI. They do not require authentication in the default configuration.
+
+### GET /dashboard/api/errors
+
+Query error events with filtering and pagination.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | string | Yes | - | Application ID |
+| `startTime` | ISO 8601 | No | 24h ago | Start of time range |
+| `endTime` | ISO 8601 | No | Now | End of time range |
+| `code` | string | No | - | Filter by error code |
+| `userId` | string | No | - | Filter by user ID |
+| `limit` | number | No | 100 | Results per page (1-1000) |
+| `offset` | number | No | 0 | Pagination offset |
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dashboard/api/errors?appId=my-app&limit=10"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "errors": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "code": "NETWORK_ERROR",
+      "message": "Failed to connect",
+      "stackTrace": "...",
+      "appId": "my-app",
+      "appVersion": "1.2.3",
+      "platform": "web",
+      "platformVersion": "Chrome 120.0",
+      "userId": "user-123",
+      "timestamp": "2024-01-15T10:30:00.000Z",
+      "metadata": {},
+      "tags": {}
+    }
+  ],
+  "pagination": {
+    "limit": 10,
+    "offset": 0,
+    "hasMore": true
+  }
+}
+```
+
+---
+
+### GET /dashboard/api/errors/:id
+
+Get a single error event by ID.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `appId` | string | Yes | Application ID |
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dashboard/api/errors/550e8400-e29b-41d4-a716-446655440000?appId=my-app"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "error": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "code": "NETWORK_ERROR",
+    "message": "Failed to connect",
+    "stackTrace": "Error: Failed to connect...\n    at fetch (/app/api.js:15:5)",
+    "appId": "my-app",
+    "appVersion": "1.2.3",
+    "platform": "web",
+    "platformVersion": "Chrome 120.0",
+    "userId": "user-123",
+    "timestamp": "2024-01-15T10:30:00.000Z",
+    "metadata": {
+      "endpoint": "/api/data"
+    },
+    "tags": {
+      "environment": "production"
+    }
+  }
+}
+```
+
+---
+
+### GET /dashboard/api/trends
+
+Get error count trends over time.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | string | Yes | - | Application ID |
+| `startTime` | ISO 8601 | No | 7d ago | Start of time range |
+| `endTime` | ISO 8601 | No | Now | End of time range |
+| `granularity` | enum | No | `hour` | `hour` or `day` |
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dashboard/api/trends?appId=my-app&granularity=day"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "trends": [
+    {
+      "time": "2024-01-14T00:00:00.000Z",
+      "count": 45,
+      "uniqueCodes": 8,
+      "affectedUsers": 12
+    },
+    {
+      "time": "2024-01-15T00:00:00.000Z",
+      "count": 32,
+      "uniqueCodes": 5,
+      "affectedUsers": 8
+    }
+  ]
+}
+```
+
+---
+
+### GET /dashboard/api/codes
+
+Get error code distribution.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `appId` | string | Yes | Application ID |
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dashboard/api/codes?appId=my-app"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "codes": [
+    { "code": "NETWORK_ERROR", "count": 156 },
+    { "code": "VALIDATION_ERROR", "count": 89 },
+    { "code": "AUTH_ERROR", "count": 45 }
+  ]
+}
+```
+
+---
+
+### GET /dashboard/api/apps
+
+List registered applications.
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/dashboard/api/apps"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "apps": [
+    {
+      "id": "my-app",
+      "name": "My Application",
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+## Error Responses
+
+All endpoints return consistent error responses:
+
+```json
+{
+  "success": false,
+  "error": "Description of what went wrong"
+}
+```
+
+### Common Status Codes
+
+| Code | Description |
+|------|-------------|
+| 400 | Bad Request - Invalid input |
+| 401 | Unauthorized - Missing API key |
+| 403 | Forbidden - Invalid API key or app mismatch |
+| 404 | Not Found - Resource doesn't exist |
+| 500 | Internal Server Error |
+| 503 | Service Unavailable - Database down |
+
+## Rate Limiting
+
+The default configuration does not include rate limiting. For production, consider adding rate limiting at the reverse proxy level or implementing it in the application.
+
+## CORS
+
+CORS is enabled for all origins by default. Configure this for production:
+
+```typescript
+// In production, restrict origins
+app.use(cors({
+  origin: ['https://dashboard.yourdomain.com'],
+  methods: ['GET', 'POST'],
+}));
+```

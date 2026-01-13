@@ -1,0 +1,327 @@
+---
+title: ErrorBoundary Component
+description: Using the ErrorBoundary component to catch React rendering errors.
+---
+
+# ErrorBoundary Component
+
+The ErrorBoundary component catches JavaScript errors anywhere in the child component tree, logs those errors to Error Ingestor, and displays a fallback UI.
+
+## Basic Usage
+
+```tsx
+import { ErrorBoundary } from "@error-ingestor/client";
+
+function App() {
+  return (
+    <ErrorBoundary fallback={<h1>Something went wrong</h1>}>
+      <MyComponent />
+    </ErrorBoundary>
+  );
+}
+```
+
+## Props
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `children` | `ReactNode` | Yes | Components to wrap |
+| `fallback` | `ReactNode \| (error, reset) => ReactNode` | Yes | Error UI |
+| `onError` | `(error, errorInfo) => void` | No | Error callback |
+| `onReset` | `() => void` | No | Reset callback |
+
+## Fallback Options
+
+### Static Fallback
+
+A simple React element to show when an error occurs:
+
+```tsx
+<ErrorBoundary fallback={<ErrorPage />}>
+  <App />
+</ErrorBoundary>
+```
+
+### Function Fallback
+
+A function that receives the error and a reset function:
+
+```tsx
+<ErrorBoundary
+  fallback={(error, reset) => (
+    <div>
+      <h1>Error: {error.message}</h1>
+      <button onClick={reset}>Try Again</button>
+    </div>
+  )}
+>
+  <App />
+</ErrorBoundary>
+```
+
+## Error Callbacks
+
+### onError
+
+Called when an error is caught. The error has already been sent to Error Ingestor.
+
+```tsx
+<ErrorBoundary
+  fallback={<ErrorPage />}
+  onError={(error, errorInfo) => {
+    // Additional logging or analytics
+    console.error("Caught error:", error);
+    console.error("Component stack:", errorInfo.componentStack);
+  }}
+>
+  <App />
+</ErrorBoundary>
+```
+
+### onReset
+
+Called when the reset function is invoked (e.g., user clicks "Try Again"):
+
+```tsx
+<ErrorBoundary
+  fallback={(error, reset) => (
+    <button onClick={reset}>Retry</button>
+  )}
+  onReset={() => {
+    // Clear any cached data or state
+    clearCache();
+  }}
+>
+  <App />
+</ErrorBoundary>
+```
+
+## Automatic Error Capture
+
+When an error is caught, ErrorBoundary automatically:
+
+1. Calls `ErrorIngestor.capture()` with the error
+2. Includes `componentStack` in metadata
+3. Adds `source: "error-boundary"` tag
+
+```typescript
+// Automatically captured with this data:
+ErrorIngestor.capture(error, {
+  tags: { source: "error-boundary" },
+  metadata: { componentStack: errorInfo.componentStack },
+});
+```
+
+## Multiple Boundaries
+
+Use multiple ErrorBoundaries to isolate failures:
+
+```tsx
+function App() {
+  return (
+    <div>
+      <ErrorBoundary fallback={<HeaderError />}>
+        <Header />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<MainError />}>
+        <Main />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<FooterError />}>
+        <Footer />
+      </ErrorBoundary>
+    </div>
+  );
+}
+```
+
+If `Main` crashes, only that section shows the error. Header and Footer continue working.
+
+## Granular Error Boundaries
+
+For complex features, wrap at the feature level:
+
+```tsx
+function Dashboard() {
+  return (
+    <div className="dashboard">
+      <ErrorBoundary fallback={<ChartError />}>
+        <AnalyticsChart />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<TableError />}>
+        <DataTable />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<WidgetError />}>
+        <Widgets />
+      </ErrorBoundary>
+    </div>
+  );
+}
+```
+
+## Reset Strategies
+
+### Simple Reset
+
+Let React re-render the component tree:
+
+```tsx
+<ErrorBoundary
+  fallback={(error, reset) => (
+    <button onClick={reset}>Try Again</button>
+  )}
+>
+  <App />
+</ErrorBoundary>
+```
+
+### Reset with State Clear
+
+Clear related state before reset:
+
+```tsx
+function App() {
+  const [key, setKey] = useState(0);
+
+  return (
+    <ErrorBoundary
+      key={key}
+      fallback={(error) => (
+        <button onClick={() => setKey(k => k + 1)}>
+          Reset Application
+        </button>
+      )}
+    >
+      <MainContent />
+    </ErrorBoundary>
+  );
+}
+```
+
+### Reset with Navigation
+
+Navigate to a safe page:
+
+```tsx
+import { useNavigate } from "react-router-dom";
+
+function ErrorFallback({ error, reset }) {
+  const navigate = useNavigate();
+
+  return (
+    <div>
+      <h1>Something went wrong</h1>
+      <button onClick={() => { reset(); navigate("/"); }}>
+        Go Home
+      </button>
+    </div>
+  );
+}
+```
+
+## What ErrorBoundary Catches
+
+ErrorBoundary catches errors in:
+
+- Rendering (during `render()`)
+- Lifecycle methods
+- Constructors of child components
+
+## What ErrorBoundary Does NOT Catch
+
+ErrorBoundary does **not** catch errors in:
+
+- Event handlers (use try-catch + `ErrorIngestor.capture()`)
+- Async code (use try-catch + `ErrorIngestor.capture()`)
+- Server-side rendering
+- Errors in the boundary itself
+
+### Handling Event Errors
+
+```tsx
+function Button() {
+  const handleClick = () => {
+    try {
+      doSomethingRisky();
+    } catch (error) {
+      ErrorIngestor.capture(error as Error, {
+        tags: { source: "button-click" }
+      });
+    }
+  };
+
+  return <button onClick={handleClick}>Click Me</button>;
+}
+```
+
+### Handling Async Errors
+
+```tsx
+function DataLoader() {
+  const loadData = async () => {
+    try {
+      await fetchData();
+    } catch (error) {
+      ErrorIngestor.capture(error as Error, {
+        tags: { source: "data-loader" }
+      });
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  return <div>Loading...</div>;
+}
+```
+
+## Complete Example
+
+```tsx
+import { ErrorBoundary, ErrorIngestor } from "@error-ingestor/client";
+
+function ErrorFallback({
+  error,
+  reset
+}: {
+  error: Error;
+  reset: () => void
+}) {
+  return (
+    <div className="error-container">
+      <h2>Oops! Something went wrong</h2>
+      <p className="error-message">{error.message}</p>
+      <div className="error-actions">
+        <button onClick={reset}>Try Again</button>
+        <button onClick={() => window.location.reload()}>
+          Reload Page
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <ErrorFallback error={error} reset={reset} />
+      )}
+      onError={(error, errorInfo) => {
+        // Additional tracking
+        console.error("Error boundary caught:", error);
+      }}
+      onReset={() => {
+        // Cleanup before retry
+        console.log("Resetting error boundary");
+      }}
+    >
+      <MainApplication />
+    </ErrorBoundary>
+  );
+}
+```

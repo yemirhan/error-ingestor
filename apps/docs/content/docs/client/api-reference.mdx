@@ -1,0 +1,377 @@
+---
+title: API Reference
+description: Complete API reference for the Error Ingestor client SDK.
+---
+
+# API Reference
+
+Complete documentation for all Error Ingestor client SDK methods.
+
+## ErrorIngestor
+
+The main singleton class for error tracking.
+
+### init(config)
+
+Initialize the Error Ingestor SDK. Must be called before any other methods.
+
+```typescript
+static init(config: ErrorIngestorConfig): Result<void, Error>
+```
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `config.apiKey` | `string` | Yes | API key for authentication |
+| `config.appId` | `string` | Yes | Unique application identifier |
+| `config.appVersion` | `string` | Yes | Application version |
+| `config.endpoint` | `string` | Yes | Error Ingestor server URL |
+| `config.userId` | `string` | No | Initial user ID |
+| `config.batchSize` | `number` | No | Errors per batch (default: 10) |
+| `config.flushInterval` | `number` | No | Flush interval in ms (default: 5000) |
+| `config.maxRetries` | `number` | No | Max retry attempts (default: 3) |
+| `config.debug` | `boolean` | No | Enable debug logging (default: false) |
+
+**Returns:** `Result<void, Error>` - Success or error using neverthrow
+
+**Example:**
+
+```typescript
+import { ErrorIngestor } from "@error-ingestor/client";
+
+const result = ErrorIngestor.init({
+  apiKey: "ei_your_api_key",
+  appId: "my-app",
+  appVersion: "1.0.0",
+  endpoint: "https://errors.example.com",
+  debug: true,
+});
+
+if (result.isErr()) {
+  console.error("Init failed:", result.error);
+}
+```
+
+---
+
+### capture(error, options?)
+
+Capture an error and add it to the queue.
+
+```typescript
+static capture(
+  error: Error | AppError,
+  options?: CaptureOptions
+): Result<void, Error>
+```
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `error` | `Error \| AppError` | Yes | The error to capture |
+| `options.metadata` | `Record<string, unknown>` | No | Additional data |
+| `options.tags` | `Record<string, string>` | No | Key-value tags for filtering |
+| `options.userId` | `string` | No | Override the current user ID |
+
+**Returns:** `Result<void, Error>`
+
+**Example:**
+
+```typescript
+// Basic capture
+ErrorIngestor.capture(new Error("Something went wrong"));
+
+// With options
+ErrorIngestor.capture(error, {
+  tags: {
+    feature: "checkout",
+    severity: "high",
+  },
+  metadata: {
+    cartId: "cart-123",
+    itemCount: 5,
+  },
+});
+```
+
+---
+
+### setUserId(userId)
+
+Set or update the user ID for subsequent error captures.
+
+```typescript
+static setUserId(userId: string | null): void
+```
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `userId` | `string \| null` | Yes | User ID or null to clear |
+
+**Example:**
+
+```typescript
+// After login
+ErrorIngestor.setUserId("user-123");
+
+// After logout
+ErrorIngestor.setUserId(null);
+```
+
+---
+
+### flush()
+
+Immediately send all queued errors to the server.
+
+```typescript
+static flush(): Promise<void>
+```
+
+**Returns:** `Promise<void>` - Resolves when flush completes
+
+**Example:**
+
+```typescript
+// Before app closes or user logs out
+await ErrorIngestor.flush();
+```
+
+---
+
+### isReady()
+
+Check if the SDK has been initialized.
+
+```typescript
+static isReady(): boolean
+```
+
+**Returns:** `boolean` - True if initialized
+
+**Example:**
+
+```typescript
+if (ErrorIngestor.isReady()) {
+  ErrorIngestor.capture(error);
+} else {
+  console.error("ErrorIngestor not initialized");
+}
+```
+
+---
+
+### getQueueSize()
+
+Get the number of errors currently in the queue.
+
+```typescript
+static getQueueSize(): number
+```
+
+**Returns:** `number` - Number of queued errors
+
+**Example:**
+
+```typescript
+const pending = ErrorIngestor.getQueueSize();
+console.log(`${pending} errors waiting to be sent`);
+```
+
+---
+
+### destroy()
+
+Destroy the ErrorIngestor instance, flushing any remaining errors.
+
+```typescript
+static destroy(): Promise<void>
+```
+
+**Returns:** `Promise<void>` - Resolves when cleanup is complete
+
+**Example:**
+
+```typescript
+// Cleanup before reinitializing
+await ErrorIngestor.destroy();
+
+// Now safe to reinitialize
+ErrorIngestor.init(newConfig);
+```
+
+---
+
+## AppError
+
+Custom error class with typed error codes.
+
+### Constructor
+
+```typescript
+constructor(code: string, message: string, metadata?: Record<string, unknown>)
+```
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `code` | `string` | Yes | Error code identifier |
+| `message` | `string` | Yes | Human-readable message |
+| `metadata` | `Record<string, unknown>` | No | Additional error data |
+
+**Example:**
+
+```typescript
+import { AppError, ErrorCodes } from "@error-ingestor/client";
+
+throw new AppError(
+  ErrorCodes.VALIDATION_ERROR,
+  "Email is invalid",
+  { field: "email", value: "not-an-email" }
+);
+```
+
+### toJSON()
+
+Serialize the error to a JSON-compatible object.
+
+```typescript
+toJSON(): { code: string; message: string; metadata?: Record<string, unknown>; timestamp: string }
+```
+
+---
+
+## ErrorCodes
+
+Pre-defined error codes for common scenarios.
+
+```typescript
+const ErrorCodes = {
+  // Authentication
+  USER_NOT_FOUND: "USER_NOT_FOUND",
+  USER_NOT_AUTHENTICATED: "USER_NOT_AUTHENTICATED",
+  INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
+  PREMIUM_REQUIRED: "PREMIUM_REQUIRED",
+  SESSION_EXPIRED: "SESSION_EXPIRED",
+  UNAUTHORIZED: "UNAUTHORIZED",
+
+  // Network
+  NETWORK_ERROR: "NETWORK_ERROR",
+  TIMEOUT: "TIMEOUT",
+
+  // Data
+  DOCUMENT_NOT_FOUND: "DOCUMENT_NOT_FOUND",
+  FETCH_FAILED: "FETCH_FAILED",
+  FUNNEL_ANSWERS_NOT_FOUND: "FUNNEL_ANSWERS_NOT_FOUND",
+
+  // Validation
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  MISSING_FIELD: "MISSING_FIELD",
+
+  // General
+  UNKNOWN: "UNKNOWN",
+  INTERNAL: "INTERNAL",
+} as const;
+```
+
+---
+
+## Utility Functions
+
+### isAppError(error)
+
+Type guard to check if an error is an AppError.
+
+```typescript
+function isAppError(error: unknown): error is AppError
+```
+
+**Example:**
+
+```typescript
+import { isAppError } from "@error-ingestor/client";
+
+try {
+  await someOperation();
+} catch (error) {
+  if (isAppError(error)) {
+    console.log("Code:", error.code);
+    console.log("Metadata:", error.metadata);
+  }
+}
+```
+
+### getErrorInfo(error)
+
+Safely extract error information from any error type.
+
+```typescript
+function getErrorInfo(error: unknown): { code: string; message: string }
+```
+
+**Example:**
+
+```typescript
+import { getErrorInfo } from "@error-ingestor/client";
+
+try {
+  await someOperation();
+} catch (error) {
+  const { code, message } = getErrorInfo(error);
+  console.log(`Error [${code}]: ${message}`);
+}
+```
+
+---
+
+## Types
+
+### ErrorIngestorConfig
+
+```typescript
+interface ErrorIngestorConfig {
+  apiKey: string;
+  appId: string;
+  appVersion: string;
+  endpoint: string;
+  userId?: string;
+  batchSize?: number;
+  flushInterval?: number;
+  maxRetries?: number;
+  debug?: boolean;
+}
+```
+
+### CaptureOptions
+
+```typescript
+interface CaptureOptions {
+  metadata?: Record<string, unknown>;
+  tags?: Record<string, string>;
+  userId?: string;
+}
+```
+
+### ErrorEvent
+
+```typescript
+interface ErrorEvent {
+  id: string;
+  code: string;
+  message: string;
+  stackTrace?: string;
+  appId: string;
+  appVersion: string;
+  platform: "ios" | "android" | "web";
+  platformVersion: string;
+  userId?: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+  tags?: Record<string, string>;
+}
+```
