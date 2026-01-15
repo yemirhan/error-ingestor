@@ -1,0 +1,258 @@
+---
+title: Expo Integration
+description: Automatically upload source maps from Expo and EAS Build
+---
+
+# Expo Integration
+
+Error Ingestor provides tools to automatically upload source maps from your Expo/React Native builds.
+
+## Packages
+
+| Package | Purpose |
+|---------|---------|
+| `@error-ingestor/expo-plugin` | Expo config plugin for EAS Build integration |
+| `@error-ingestor/cli` | CLI for manual source map uploads |
+
+## Installation
+
+```bash
+npm install @error-ingestor/expo-plugin @error-ingestor/cli --save-dev
+```
+
+## Expo Plugin Setup
+
+### 1. Configure app.json
+
+Add the plugin to your Expo configuration:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "@error-ingestor/expo-plugin"
+    ]
+  }
+}
+```
+
+### 2. Configure EAS Secrets
+
+Set up environment variables in your `eas.json`:
+
+```json
+{
+  "build": {
+    "production": {
+      "env": {
+        "ERROR_INGESTOR_ENDPOINT": "https://your-server.com",
+        "ERROR_INGESTOR_API_KEY": "@error-ingestor-api-key"
+      }
+    },
+    "preview": {
+      "env": {
+        "ERROR_INGESTOR_ENDPOINT": "https://your-server.com",
+        "ERROR_INGESTOR_API_KEY": "@error-ingestor-api-key"
+      }
+    }
+  }
+}
+```
+
+For the API key, use [EAS Secrets](https://docs.expo.dev/build-reference/variables/#using-secrets-in-environment-variables):
+
+```bash
+eas secret:create --name error-ingestor-api-key --value "your-api-key"
+```
+
+### 3. Add Build Hook
+
+The plugin automatically adds an EAS build hook, but you can also add it manually:
+
+```json
+{
+  "scripts": {
+    "eas-build-on-success": "npx @error-ingestor/cli upload-sourcemaps"
+  }
+}
+```
+
+## EAS Build Workflow
+
+When you run an EAS build:
+
+```bash
+eas build --platform ios --profile production
+```
+
+The plugin will:
+
+1. Generate source maps during the build
+2. Upload them to your Error Ingestor server after a successful build
+3. Associate them with the app version from your `app.json`
+
+## EAS Update Workflow
+
+For over-the-air updates with EAS Update, source maps need to be uploaded manually after running `eas update`:
+
+```bash
+# Create the update
+eas update --branch production
+
+# Upload source maps
+npx @error-ingestor/cli upload-sourcemaps dist
+```
+
+Or combine them:
+
+```bash
+eas update --branch production && npx @error-ingestor/cli upload-sourcemaps dist
+```
+
+## CLI Usage
+
+### Basic Upload
+
+Upload all source maps from a directory:
+
+```bash
+npx @error-ingestor/cli upload-sourcemaps dist
+```
+
+### Options
+
+```bash
+npx @error-ingestor/cli upload-sourcemaps [directory] [options]
+
+Options:
+  --endpoint <url>       Server endpoint URL
+  --api-key <key>        API key for authentication
+  --app-version <ver>    App version (defaults to package.json version)
+  --platform <platform>  Filter by platform (ios, android, web)
+  --dry-run              Show what would be uploaded
+```
+
+### Examples
+
+```bash
+# Upload with explicit options
+npx @error-ingestor/cli upload-sourcemaps dist \
+  --endpoint https://errors.example.com \
+  --api-key ei_xxx \
+  --app-version 1.2.3
+
+# Dry run to see what would be uploaded
+npx @error-ingestor/cli upload-sourcemaps dist --dry-run
+
+# Upload only iOS source maps
+npx @error-ingestor/cli upload-sourcemaps dist --platform ios
+```
+
+## Environment Variables
+
+The CLI reads configuration from environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `ERROR_INGESTOR_ENDPOINT` | Server endpoint URL |
+| `ERROR_INGESTOR_API_KEY` | API key for authentication |
+| `npm_package_version` | Used as app version if not specified |
+| `EAS_BUILD_APP_VERSION` | App version from EAS Build (auto-set) |
+
+## Source Map Locations
+
+The CLI automatically searches for source maps in common locations:
+
+| Build Type | Location |
+|------------|----------|
+| EAS Update | `dist/bundles/*.map` |
+| Web Export | `dist/_expo/static/js/web/*.map` |
+
+## Complete Example
+
+### 1. Initialize Error Ingestor in Your App
+
+```typescript
+// App.tsx
+import { ErrorIngestor } from "@error-ingestor/client";
+import Constants from "expo-constants";
+
+ErrorIngestor.init({
+  apiKey: process.env.EXPO_PUBLIC_ERROR_INGESTOR_API_KEY!,
+  appId: "com.yourcompany.app",
+  appVersion: Constants.expoConfig?.version ?? "1.0.0",
+  endpoint: process.env.EXPO_PUBLIC_ERROR_INGESTOR_ENDPOINT!,
+});
+```
+
+### 2. Configure app.json
+
+```json
+{
+  "expo": {
+    "name": "Your App",
+    "version": "1.0.0",
+    "plugins": [
+      "@error-ingestor/expo-plugin"
+    ]
+  }
+}
+```
+
+### 3. Configure eas.json
+
+```json
+{
+  "build": {
+    "production": {
+      "env": {
+        "ERROR_INGESTOR_ENDPOINT": "https://errors.yourcompany.com",
+        "ERROR_INGESTOR_API_KEY": "@error-ingestor-api-key"
+      }
+    }
+  }
+}
+```
+
+### 4. Build and Deploy
+
+```bash
+# For native builds
+eas build --platform all --profile production
+
+# For OTA updates
+eas update --branch production
+npx @error-ingestor/cli upload-sourcemaps dist
+```
+
+## Troubleshooting
+
+### Source Maps Not Found
+
+If the CLI reports no source maps found:
+
+1. Ensure source maps are being generated (check for `.map` files in `dist/`)
+2. Run with `--dry-run` to see what paths are being searched
+3. For EAS Update, make sure you've run `eas update` first
+
+### Upload Failures
+
+If uploads fail:
+
+1. Verify your API key is correct
+2. Check the endpoint URL is accessible
+3. Ensure the server has the source maps table created (run database migrations)
+
+### Version Mismatch
+
+If stack traces aren't being resolved:
+
+1. Verify `appVersion` in your client matches the uploaded source maps
+2. Check that source maps were uploaded for the correct version
+3. Use the `/api/v1/sourcemaps/list` endpoint to see uploaded versions
+
+## Next Steps
+
+- Learn about [Stack Traces](/docs/advanced/stack-traces) parsing
+- Understand [Source Maps](/docs/advanced/source-maps) resolution
+- Review the [React Native Integration](/docs/integrations/react-native) guide

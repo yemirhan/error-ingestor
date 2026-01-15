@@ -11,6 +11,9 @@ export {
 // Schemas
 export {
   PlatformSchema,
+  StackParserSchema,
+  StackFrameSchema,
+  ParsedStackTraceSchema,
   ErrorEventSchema,
   BatchIngestRequestSchema,
   BatchIngestResponseSchema,
@@ -28,6 +31,10 @@ export {
 
 // Types
 export type {
+  StackFrame,
+  StackParser,
+  ParsedStackTrace,
+  InAppConfig,
   ErrorIngestorConfig,
   CaptureOptions,
   DeviceInfo,

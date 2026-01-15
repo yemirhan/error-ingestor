@@ -4,12 +4,39 @@ import { z } from "zod";
 export const PlatformSchema = z.enum(["ios", "android", "web"]);
 export type Platform = z.infer<typeof PlatformSchema>;
 
+/** Stack parser type */
+export const StackParserSchema = z.enum(["browser", "react-native", "node", "unknown"]);
+
+/** Single stack frame schema */
+export const StackFrameSchema = z.object({
+  functionName: z.string().nullable(),
+  fileName: z.string().nullable(),
+  lineNumber: z.number().int().nullable(),
+  columnNumber: z.number().int().nullable(),
+  inApp: z.boolean(),
+  raw: z.string(),
+  // Server-populated fields after source map resolution
+  originalFileName: z.string().nullable().optional(),
+  originalLineNumber: z.number().int().nullable().optional(),
+  originalColumnNumber: z.number().int().nullable().optional(),
+  originalFunctionName: z.string().nullable().optional(),
+  resolved: z.boolean().optional(),
+});
+
+/** Parsed stack trace schema */
+export const ParsedStackTraceSchema = z.object({
+  frames: z.array(StackFrameSchema),
+  raw: z.string(),
+  parser: StackParserSchema,
+});
+
 /** Single error event schema */
 export const ErrorEventSchema = z.object({
   id: z.string().uuid(),
   code: z.string().min(1),
   message: z.string(),
   stackTrace: z.string(),
+  parsedStack: ParsedStackTraceSchema.optional(),
   appId: z.string().min(1),
   appVersion: z.string(),
   platform: PlatformSchema,

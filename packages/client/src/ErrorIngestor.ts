@@ -3,13 +3,16 @@ import type {
   ErrorEvent,
   ErrorIngestorConfig,
   CaptureOptions,
+  InAppConfig,
 } from "@error-ingestor/shared";
 import { AppError, isAppError, ErrorCodes } from "@error-ingestor/shared";
 import { ErrorQueue } from "./queue";
 import { generateUUID, getPlatformInfo, createLogger } from "./utils";
+import { parseStackTrace } from "./stackParser";
 
-interface InternalConfig extends Required<Omit<ErrorIngestorConfig, "userId">> {
+interface InternalConfig extends Required<Omit<ErrorIngestorConfig, "userId" | "inAppConfig">> {
   userId?: string;
+  inAppConfig?: InAppConfig;
 }
 
 const DEFAULT_CONFIG = {
@@ -17,6 +20,7 @@ const DEFAULT_CONFIG = {
   flushInterval: 5000,
   maxRetries: 3,
   debug: false,
+  parseStack: true,
 } as const;
 
 class ErrorIngestorClient {
@@ -167,11 +171,17 @@ class ErrorIngestorClient {
       ? { ...error.metadata, ...options?.metadata }
       : options?.metadata;
 
+    const stackTrace = error.stack ?? "";
+    const parsedStack = config.parseStack
+      ? parseStackTrace(stackTrace, platformInfo.platform, config.inAppConfig)
+      : undefined;
+
     return {
       id: generateUUID(),
       code,
       message: error.message,
-      stackTrace: error.stack ?? "",
+      stackTrace,
+      parsedStack,
       appId: config.appId,
       appVersion: config.appVersion,
       platform: platformInfo.platform,

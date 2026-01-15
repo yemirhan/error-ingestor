@@ -24,6 +24,10 @@
     "server/deployment",
     "---Dashboard---",
     "dashboard/overview",
+    "---Advanced Features---",
+    "advanced/stack-traces",
+    "advanced/source-maps",
+    "advanced/expo-integration",
     "---Architecture---",
     "architecture/overview",
     "architecture/data-flow"

@@ -6,6 +6,7 @@ import { prettyJSON } from "hono/pretty-json";
 import { ingestRouter } from "./routes/ingest";
 import { healthRouter } from "./routes/health";
 import { dashboardRouter } from "./routes/dashboard";
+import { sourcemapsRouter } from "./routes/sourcemaps";
 import { authMiddleware } from "./middleware/auth";
 import { config } from "./config";
 
@@ -34,6 +35,7 @@ app.get("/", (c) => {
     endpoints: {
       health: "/health",
       ingest: "/api/v1/ingest",
+      sourcemaps: "/api/v1/sourcemaps",
       dashboard: "/dashboard/api",
     },
   });
@@ -42,6 +44,7 @@ app.get("/", (c) => {
 // Protected API routes (API key auth)
 app.use("/api/*", authMiddleware);
 app.route("/api/v1", ingestRouter);
+app.route("/api/v1/sourcemaps", sourcemapsRouter);
 
 // Dashboard routes (no auth for demo, add session auth in production)
 app.route("/dashboard/api", dashboardRouter);

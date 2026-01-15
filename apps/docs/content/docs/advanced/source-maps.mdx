@@ -1,0 +1,203 @@
+---
+title: Source Maps
+description: Upload source maps to see original source code locations in your stack traces
+---
+
+# Source Maps
+
+Source maps allow Error Ingestor to translate minified/bundled code locations back to your original source files. This makes debugging production errors much easier.
+
+## Why Source Maps?
+
+When your JavaScript/TypeScript is bundled for production, the code is:
+
+- **Minified** - Variable names shortened, whitespace removed
+- **Bundled** - Multiple files combined into one
+- **Transpiled** - TypeScript/JSX converted to plain JavaScript
+
+Without source maps, stack traces show locations in the bundled output:
+
+```
+at t (main.a1b2c3.js:1:12345)
+```
+
+With source maps, you see the original location:
+
+```
+at handleClick (src/components/Button.tsx:42:15)
+```
+
+## Server-Side Resolution
+
+Error Ingestor stores source maps on the server and resolves stack frames when errors are queried. This approach:
+
+- Keeps source maps secure (not exposed to clients)
+- Allows re-resolution if source maps are updated
+- Doesn't increase client bundle size
+
+## Uploading Source Maps
+
+### API Endpoint
+
+Upload source maps using the `/api/v1/sourcemaps/upload` endpoint:
+
+```bash
+curl -X POST https://your-server.com/api/v1/sourcemaps/upload \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "appVersion": "1.0.0",
+    "fileName": "main.js",
+    "sourceMap": "{ ... source map JSON ... }"
+  }'
+```
+
+### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `appVersion` | string | The app version this source map belongs to |
+| `fileName` | string | The bundle file name (e.g., `main.js`, `index.bundle`) |
+| `sourceMap` | string | The source map JSON content as a string |
+
+### Batch Upload
+
+Upload multiple source maps in one request:
+
+```bash
+curl -X POST https://your-server.com/api/v1/sourcemaps/upload-batch \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "appVersion": "1.0.0",
+    "sourceMaps": [
+      { "fileName": "main.js", "sourceMap": "..." },
+      { "fileName": "vendor.js", "sourceMap": "..." }
+    ]
+  }'
+```
+
+### Listing Source Maps
+
+View uploaded source maps:
+
+```bash
+curl https://your-server.com/api/v1/sourcemaps/list?appVersion=1.0.0 \
+  -H "X-API-Key: your-api-key"
+```
+
+### Deleting Source Maps
+
+Remove source maps for a version:
+
+```bash
+curl -X DELETE https://your-server.com/api/v1/sourcemaps/1.0.0 \
+  -H "X-API-Key: your-api-key"
+```
+
+## Build Tool Integration
+
+### Webpack
+
+Use the `SourceMapDevToolPlugin` to generate source maps:
+
+```javascript
+// webpack.config.js
+module.exports = {
+  devtool: "source-map",
+  // or use the plugin for more control
+  plugins: [
+    new webpack.SourceMapDevToolPlugin({
+      filename: "[file].map",
+      publicPath: "/",
+    }),
+  ],
+};
+```
+
+After building, upload the `.map` files:
+
+```bash
+for file in dist/*.map; do
+  curl -X POST https://your-server.com/api/v1/sourcemaps/upload \
+    -H "X-API-Key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"appVersion\": \"$VERSION\",
+      \"fileName\": \"$(basename ${file%.map})\",
+      \"sourceMap\": $(cat $file | jq -Rs .)
+    }"
+done
+```
+
+### Vite
+
+Vite generates source maps by default in production:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  build: {
+    sourcemap: true,
+  },
+});
+```
+
+### Metro (React Native)
+
+For React Native, see the [Expo Integration](/docs/advanced/expo-integration) guide for automatic source map uploads.
+
+## Dashboard Display
+
+When viewing an error with resolved source maps:
+
+1. Frames show a **MAPPED** badge
+2. Original file paths are displayed
+3. Original line/column numbers are shown
+4. A green checkmark indicates successful resolution
+
+### Resolution Status
+
+| Badge | Meaning |
+|-------|---------|
+| **MAPPED** | Source map was found and applied |
+| No badge | No source map available for this frame |
+
+## Best Practices
+
+### Version Consistency
+
+Always match source map versions to your deployed code:
+
+```typescript
+ErrorIngestor.init({
+  appVersion: process.env.APP_VERSION, // Must match uploaded source maps
+});
+```
+
+### CI/CD Integration
+
+Upload source maps as part of your deployment pipeline:
+
+```yaml
+# GitHub Actions example
+- name: Upload source maps
+  run: |
+    for file in dist/*.map; do
+      npx @error-ingestor/cli upload-sourcemaps dist/
+    done
+  env:
+    ERROR_INGESTOR_API_KEY: ${{ secrets.ERROR_INGESTOR_API_KEY }}
+    ERROR_INGESTOR_ENDPOINT: ${{ secrets.ERROR_INGESTOR_ENDPOINT }}
+```
+
+### Security
+
+- Don't expose source maps publicly in production
+- Use API key authentication for uploads
+- Consider using EAS Secrets for React Native apps
+
+## Next Steps
+
+- Set up [Expo Integration](/docs/advanced/expo-integration) for automatic uploads
+- Learn about [Stack Traces](/docs/advanced/stack-traces) parsing

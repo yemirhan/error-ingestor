@@ -15,6 +15,7 @@
     "@error-ingestor/shared": "workspace:*",
     "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.4.1",
+    "@jridgewell/trace-mapping": "^0.3.31",
     "hono": "^4.6.0",
     "neverthrow": "^8.1.1",
     "zod": "^3.24.1"

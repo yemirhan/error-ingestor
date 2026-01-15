@@ -1,4 +1,5 @@
 import type { ErrorEvent } from "@error-ingestor/shared";
+import { StackTraceView } from "./StackTraceView";
 
 interface ErrorDetailsProps {
   error: ErrorEvent;
@@ -166,10 +167,13 @@ export function ErrorDetails({ error, onClose }: ErrorDetailsProps) {
             </div>
           </div>
 
-          {error.stackTrace && (
+          {(error.stackTrace || error.parsedStack) && (
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Stack Trace</div>
-              <pre style={styles.stackTrace}>{error.stackTrace}</pre>
+              <StackTraceView
+                parsedStack={error.parsedStack}
+                rawStackTrace={error.stackTrace}
+              />
             </div>
           )}
 

@@ -1,0 +1,30 @@
+{
+  "name": "@error-ingestor/cli",
+  "version": "0.1.0",
+  "description": "CLI for uploading source maps to Error Ingestor",
+  "bin": {
+    "error-ingestor": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "error-tracking",
+    "source-maps",
+    "cli",
+    "react-native",
+    "expo"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0"
+  }
+}

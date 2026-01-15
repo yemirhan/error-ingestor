@@ -1,0 +1,144 @@
+---
+title: Stack Traces
+description: Learn how Error Ingestor parses and displays stack traces with in-app frame detection
+---
+
+# Stack Traces
+
+Error Ingestor automatically parses stack traces into structured frames, making it easier to identify the source of errors in your application code.
+
+## How It Works
+
+When an error is captured, the client SDK parses the raw stack trace string into structured `StackFrame` objects. Each frame contains:
+
+- **Function name** - The name of the function where the error occurred
+- **File name** - The file path or URL
+- **Line/column numbers** - Precise location in the source code
+- **In-app flag** - Whether this frame is from your application code
+
+```typescript
+interface StackFrame {
+  functionName: string | null;
+  fileName: string | null;
+  lineNumber: number | null;
+  columnNumber: number | null;
+  inApp: boolean;
+  raw: string;
+}
+```
+
+## Supported Formats
+
+The parser handles stack traces from multiple environments:
+
+### Chrome / V8 / Node.js
+
+```
+Error: Something went wrong
+    at fetchData (http://localhost:3000/app.js:42:15)
+    at async loadUser (http://localhost:3000/app.js:28:5)
+```
+
+### Firefox / Safari
+
+```
+fetchData@http://localhost:3000/app.js:42:15
+loadUser@http://localhost:3000/app.js:28:5
+```
+
+### React Native (Hermes)
+
+```
+Error: Something went wrong
+    at fetchData (address at index.bundle:42:15)
+    at loadUser (index.bundle:28:5)
+```
+
+## In-App Frame Detection
+
+The SDK automatically distinguishes between your application code and third-party library code. By default, frames are marked as **not in-app** if they match these patterns:
+
+- `node_modules`
+- `react-dom`
+- `react-native`
+- `webpack`
+- `metro`
+- `__webpack_require__`
+- `regenerator-runtime`
+
+### Customizing Detection
+
+You can customize which frames are considered in-app using the `inAppConfig` option:
+
+```typescript
+ErrorIngestor.init({
+  apiKey: "your-api-key",
+  appId: "your-app-id",
+  appVersion: "1.0.0",
+  endpoint: "https://your-server.com",
+  // Customize in-app detection
+  inAppConfig: {
+    // Only frames matching these patterns are in-app
+    includePatterns: [/src\//, /app\//],
+    // Additional patterns to exclude
+    excludePatterns: [/vendor\//, /third-party\//],
+  },
+});
+```
+
+### Pattern Types
+
+Both `includePatterns` and `excludePatterns` accept:
+
+- **Strings** - Simple substring matching (`"src/"`)
+- **RegExp** - Regular expression patterns (`/src\/components/`)
+
+```typescript
+inAppConfig: {
+  includePatterns: [
+    "src/",                    // String match
+    /\/app\//,                 // RegExp match
+    /components\/.*\.tsx?$/,   // Complex pattern
+  ],
+  excludePatterns: [
+    "node_modules",
+    /\.test\.(ts|js)$/,        // Exclude test files
+  ],
+}
+```
+
+## Disabling Stack Parsing
+
+If you don't need parsed stack traces, you can disable parsing to reduce bundle size slightly:
+
+```typescript
+ErrorIngestor.init({
+  // ... other options
+  parseStack: false, // Disable stack parsing
+});
+```
+
+When disabled, only the raw stack trace string is captured.
+
+## Dashboard Visualization
+
+In the Error Ingestor dashboard, stack traces are displayed with:
+
+- **Color-coded frames** - In-app frames are highlighted
+- **Collapsible view** - Toggle between parsed and raw views
+- **Frame statistics** - Total frames, in-app count, source-mapped count
+- **Parser indicator** - Shows which parser was used (browser, react-native, node)
+
+### Frame Display
+
+Each frame shows:
+
+1. Function name (or `<anonymous>` if not available)
+2. File location with line and column numbers
+3. **APP** badge for in-app frames
+4. **MAPPED** badge for source-mapped frames (see [Source Maps](/docs/advanced/source-maps))
+
+## Next Steps
+
+- Learn about [Source Maps](/docs/advanced/source-maps) to see original source code locations
+- Set up [Expo Integration](/docs/advanced/expo-integration) for automatic source map uploads

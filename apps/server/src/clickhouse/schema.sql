@@ -18,6 +18,22 @@ CREATE TABLE IF NOT EXISTS error_ingestor.error_events (
     metadata String DEFAULT '{}',
     tags Map(String, String),
 
+    -- Parsed stack trace data
+    parsed_stack_frames Array(Tuple(
+        function_name Nullable(String),
+        file_name Nullable(String),
+        line_number Nullable(Int32),
+        column_number Nullable(Int32),
+        in_app Bool,
+        raw String,
+        original_file_name Nullable(String),
+        original_line_number Nullable(Int32),
+        original_column_number Nullable(Int32),
+        original_function_name Nullable(String),
+        resolved Bool
+    )) DEFAULT [],
+    stack_parser LowCardinality(String) DEFAULT 'unknown',
+
     -- Derived columns for efficient querying
     date Date DEFAULT toDate(timestamp),
     hour DateTime DEFAULT toStartOfHour(timestamp)
@@ -66,3 +82,36 @@ CREATE TABLE IF NOT EXISTS error_ingestor.apps (
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
+
+-- Source maps table for storing uploaded source maps
+CREATE TABLE IF NOT EXISTS error_ingestor.source_maps (
+    id UUID DEFAULT generateUUIDv4(),
+    app_id LowCardinality(String),
+    app_version LowCardinality(String),
+    file_name String,
+    source_map String,
+    created_at DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(created_at)
+ORDER BY (app_id, app_version, file_name);
+
+-- Migration: Add parsed stack columns to error_events
+-- Run these ALTER statements if upgrading from an existing installation:
+--
+-- ALTER TABLE error_ingestor.error_events
+-- ADD COLUMN IF NOT EXISTS parsed_stack_frames Array(Tuple(
+--     function_name Nullable(String),
+--     file_name Nullable(String),
+--     line_number Nullable(Int32),
+--     column_number Nullable(Int32),
+--     in_app Bool,
+--     raw String,
+--     original_file_name Nullable(String),
+--     original_line_number Nullable(Int32),
+--     original_column_number Nullable(Int32),
+--     original_function_name Nullable(String),
+--     resolved Bool
+-- )) DEFAULT [];
+--
+-- ALTER TABLE error_ingestor.error_events
+-- ADD COLUMN IF NOT EXISTS stack_parser LowCardinality(String) DEFAULT 'unknown';

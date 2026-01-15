@@ -1,6 +1,9 @@
 import "./global.css";
 import { RootProvider } from "fumadocs-ui/provider";
+import { Inter } from "next/font/google";
 import type { Metadata } from "next";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
@@ -18,7 +21,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>
+      <body className={inter.className}>
         <RootProvider>{children}</RootProvider>
       </body>
     </html>
