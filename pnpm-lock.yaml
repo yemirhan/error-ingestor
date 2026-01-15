@@ -217,6 +217,12 @@ importers:
       '@babel/core':
         specifier: ^7.26.0
         version: 7.28.6
+      '@error-ingestor/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@error-ingestor/expo-plugin':
+        specifier: workspace:*
+        version: link:../../packages/expo-plugin
       '@types/react':
         specifier: ^19.1.0
         version: 19.2.8

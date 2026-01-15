@@ -6,7 +6,8 @@
     "start": "npx expo start",
     "android": "npx expo start --android",
     "ios": "npx expo start --ios",
-    "web": "npx expo start --web"
+    "web": "npx expo start --web",
+    "eas-build-on-success": "npx @error-ingestor/cli upload-sourcemaps"
   },
   "dependencies": {
     "@error-ingestor/client": "workspace:*",
@@ -25,6 +26,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@error-ingestor/cli": "workspace:*",
+    "@error-ingestor/expo-plugin": "workspace:*",
     "@types/react": "19.1.17",
     "typescript": "~5.9.3"
   },
