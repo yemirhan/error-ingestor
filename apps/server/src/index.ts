@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
@@ -70,10 +71,13 @@ app.notFound((c) => {
 
 // Startup
 console.log(`Starting Error Ingestor Server...`);
-console.log(`Server running on http://localhost:${config.port}`);
 console.log(`Test API key: ei_test_key_12345`);
 
-export default {
-  port: config.port,
+serve({
   fetch: app.fetch,
-};
+  port: config.port,
+}, (info) => {
+  console.log(`Server running on http://localhost:${info.port}`);
+});
+
+export { app };

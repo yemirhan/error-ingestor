@@ -118,9 +118,10 @@ export class ErrorQueue {
           "X-API-Key": this.config.apiKey,
         },
         body: JSON.stringify({ events }),
-      }).then((res) => {
+      }).then(async (res) => {
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          const body = await res.text();
+          throw new Error(`HTTP ${res.status}: ${body}`);
         }
       }),
       (e) => (e instanceof Error ? e : new Error(String(e)))

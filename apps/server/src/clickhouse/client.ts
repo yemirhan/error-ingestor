@@ -30,23 +30,29 @@ class ClickHouseService {
   }
 
   insertEvents(events: ErrorEvent[]): ResultAsync<void, Error> {
+    // Format events for ClickHouse insert
+    const rows = events.map((e) => ({
+      id: e.id,
+      code: e.code,
+      message: e.message,
+      stack_trace: e.stackTrace,
+      app_id: e.appId,
+      app_version: e.appVersion,
+      platform: e.platform,
+      platform_version: e.platformVersion,
+      user_id: e.userId ?? null,
+      // Convert ISO timestamp to ClickHouse format (remove Z suffix)
+      timestamp: e.timestamp.replace("Z", "").replace("T", " "),
+      // Metadata as JSON string
+      metadata: JSON.stringify(e.metadata ?? {}),
+      // Tags as object for Map type
+      tags: e.tags ?? {},
+    }));
+
     return ResultAsync.fromPromise(
       this.client.insert({
         table: "error_events",
-        values: events.map((e) => ({
-          id: e.id,
-          code: e.code,
-          message: e.message,
-          stack_trace: e.stackTrace,
-          app_id: e.appId,
-          app_version: e.appVersion,
-          platform: e.platform,
-          platform_version: e.platformVersion,
-          user_id: e.userId ?? null,
-          timestamp: e.timestamp,
-          metadata: JSON.stringify(e.metadata ?? {}),
-          tags: e.tags ?? {},
-        })),
+        values: rows,
         format: "JSONEachRow",
       }),
       (e) => new Error(`ClickHouse insert failed: ${e}`)
@@ -92,8 +98,8 @@ class ClickHouseService {
       query,
       query_params: {
         appId: params.appId,
-        startTime: params.startTime,
-        endTime: params.endTime,
+        startTime: params.startTime.replace("Z", ""),
+        endTime: params.endTime.replace("Z", ""),
         code: params.code ?? "",
         userId: params.userId ?? "",
         limit: params.limit ?? 100,
@@ -139,8 +145,8 @@ class ClickHouseService {
       query,
       query_params: {
         appId: params.appId,
-        startTime: params.startTime,
-        endTime: params.endTime,
+        startTime: params.startTime.replace("Z", ""),
+        endTime: params.endTime.replace("Z", ""),
       },
       format: "JSONEachRow",
     });

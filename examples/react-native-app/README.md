@@ -28,13 +28,13 @@ pnpm --filter @error-ingestor/server dev
 ### 2. Install Dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 3. Start the App
 
 ```bash
-npx expo start
+pnpm start
 ```
 
 Then press:

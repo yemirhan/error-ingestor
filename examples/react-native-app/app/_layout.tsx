@@ -6,7 +6,7 @@ import { ErrorFallback } from "../src/components/ErrorFallback";
 // Initialize Error Ingestor
 ErrorIngestor.init({
   apiKey: "ei_test_key_12345", // Use your actual API key
-  appId: "com.example.erroringestor",
+  appId: "test-app", // Must match the appId registered with the API key
   appVersion: "1.0.0",
   endpoint: "http://localhost:3000", // Your Error Ingestor server
   debug: __DEV__, // Enable logging in development

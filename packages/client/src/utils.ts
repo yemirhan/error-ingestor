@@ -18,28 +18,39 @@ export function getPlatformInfo(): {
   platform: "ios" | "android" | "web";
   platformVersion: string;
 } {
-  // Check if React Native Platform is available
-  try {
-    // Dynamic import to avoid bundling issues
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Platform } = require("react-native");
-    return {
-      platform: Platform.OS === "ios" ? "ios" : "android",
-      platformVersion: String(Platform.Version),
-    };
-  } catch {
-    // Fallback to web
-    if (typeof navigator !== "undefined") {
+  // Detect platform without importing react-native (avoids Metro static analysis issues)
+
+  // Check navigator.product for React Native
+  if (typeof navigator !== "undefined" && navigator.product === "ReactNative") {
+    // We're in React Native - detect iOS vs Android from userAgent or other hints
+    const userAgent = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+
+    if (userAgent.includes("Android") || /android/i.test(userAgent)) {
       return {
-        platform: "web",
-        platformVersion: navigator.userAgent,
+        platform: "android",
+        platformVersion: userAgent,
       };
     }
+
+    // Default to iOS for React Native (most common, and iOS doesn't always have clear userAgent)
     return {
-      platform: "web",
-      platformVersion: "unknown",
+      platform: "ios",
+      platformVersion: userAgent || "unknown",
     };
   }
+
+  // Check for web browser
+  if (typeof window !== "undefined" && typeof navigator !== "undefined") {
+    return {
+      platform: "web",
+      platformVersion: navigator.userAgent,
+    };
+  }
+
+  return {
+    platform: "web",
+    platformVersion: "unknown",
+  };
 }
 
 /** Simple logger that respects debug mode */

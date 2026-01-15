@@ -21,5 +21,17 @@
     "clean": {
       "cache": false
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "CLICKHOUSE_HOST",
+    "CLICKHOUSE_USER",
+    "CLICKHOUSE_PASSWORD",
+    "CLICKHOUSE_DATABASE"
+  ],
+  "globalEnv": [
+    "CLICKHOUSE_HOST",
+    "CLICKHOUSE_USER",
+    "CLICKHOUSE_PASSWORD",
+    "CLICKHOUSE_DATABASE"
+  ]
 }

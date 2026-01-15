@@ -14,7 +14,7 @@ A Next.js 15 (App Router) example demonstrating error tracking with `@error-inge
 
 ```bash
 cd examples/nextjs-app
-npm install
+pnpm install
 ```
 
 2. **Configure environment:**
@@ -34,7 +34,7 @@ NEXT_PUBLIC_ERROR_INGESTOR_APP_ID=nextjs-demo
 3. **Start the development server:**
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Visit [http://localhost:3000](http://localhost:3000)
@@ -204,7 +204,7 @@ The example includes several demo buttons:
 
 3. **Start this example**:
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
 4. **Trigger errors** using the demo buttons
@@ -214,8 +214,8 @@ The example includes several demo buttons:
 ## Production Build
 
 ```bash
-npm run build
-npm start
+pnpm build
+pnpm start
 ```
 
 ## Server-Side Error Handling

@@ -4,7 +4,7 @@ export const config = {
   clickhouse: {
     host: process.env["CLICKHOUSE_HOST"] ?? "http://localhost:8123",
     username: process.env["CLICKHOUSE_USER"] ?? "default",
-    password: process.env["CLICKHOUSE_PASSWORD"] ?? "",
+    password: process.env["CLICKHOUSE_PASSWORD"] ?? "12345",
     database: process.env["CLICKHOUSE_DATABASE"] ?? "error_ingestor",
   },
 } as const;

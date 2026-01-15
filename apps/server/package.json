@@ -13,6 +13,7 @@
   "dependencies": {
     "@clickhouse/client": "^1.8.1",
     "@error-ingestor/shared": "workspace:*",
+    "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.4.1",
     "hono": "^4.6.0",
     "neverthrow": "^8.1.1",

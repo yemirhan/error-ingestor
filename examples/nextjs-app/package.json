@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 4141",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --port 4141",
     "lint": "next lint"
   },
   "dependencies": {
-    "@error-ingestor/client": "file:../../packages/client",
+    "@error-ingestor/client": "workspace:*",
     "next": "15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
